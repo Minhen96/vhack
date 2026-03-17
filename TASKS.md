@@ -56,21 +56,21 @@ Phase A complete: 2026-03-17
 
 ---
 
-## Phase C — LLM Command Agent
+## Phase C — LLM Command Agent ✅
 > Goal: Agent autonomously runs the full observe → plan → act loop, streams thoughts
 
-- [ ] `agent.py` — `build_llm()` with provider switch (Gemini / DeepSeek / OpenAI / Claude)
-- [ ] `agent.py` — LangChain agent with `langchain-mcp-adapters` tool loading
-- [ ] `agent.py` — system prompt: ARIA persona, constraints, chain-of-thought format
-- [ ] `agent.py` — state summarizer: converts full grid → compact prompt string
-- [ ] `agent.py` — agent loop as `asyncio.create_task` (decoupled from tick loop)
-- [ ] `agent.py` — agent memory dict (cleared cells, confirmed survivors, relay positions)
-- [ ] `agent.py` — emit `agent_thought` WebSocket events per reasoning phase
-- [ ] Agent behavior: calls `list_active_drones()` at start of every cycle (no hardcoded IDs)
-- [ ] Agent behavior: battery check before long assignments
-- [ ] Agent behavior: swarm consensus — 2 scout confirms before medic dispatch
-- [ ] Agent behavior: redeploy relay when drone goes out of mesh range
-- [ ] Agent behavior: leader election awareness — replan when leader changes
+- [x] `agent.py` — `build_llm()` with provider switch (Gemini / DeepSeek / OpenAI / Claude)
+- [x] `agent.py` — LangChain ReAct agent with StructuredTool wrappers over MCP functions
+- [x] `agent.py` — system prompt: ARIA persona, constraints, chain-of-thought format
+- [x] `agent.py` — state summarizer: converts full grid → compact prompt string
+- [x] `agent.py` — agent loop as `asyncio.create_task` (decoupled from tick loop)
+- [x] `agent.py` — `AgentMemory` dataclass (cleared cells, confirmed survivors, relay positions)
+- [x] `agent.py` — emit `agent_thought` WebSocket events per reasoning phase
+- [x] Agent behavior: calls `list_active_drones()` at start of every cycle (no hardcoded IDs)
+- [x] Agent behavior: battery check before long assignments (enforced via system prompt)
+- [x] Agent behavior: swarm consensus — 2 scout confirms before medic dispatch
+- [x] Agent behavior: redeploy relay when drone goes out of mesh range
+- [x] Agent behavior: leader election awareness — replan when leader changes
 - [ ] Test: agent completes a full EARTHQUAKE_ALPHA scenario end-to-end
 
 ---
@@ -139,3 +139,4 @@ Phase A complete: 2026-03-17
 - [x] 2026-03-17 — Phase A complete: full backend simulation, models, utils, FastAPI + WebSocket server
 - [x] 2026-03-17 — Backend refactored to industry-standard structure (core/, api/, routers split, DI pattern, standardised API responses)
 - [x] 2026-03-17 — Phase B complete: all MCP tools implemented in mcp_server.py
+- [x] 2026-03-17 — Phase C complete: ARIA agent loop, LLM provider switch, memory, WS streaming

@@ -9,5 +9,8 @@ fastmcp>=2.0.0
 
 # LLM agent (Phase C)
 langchain>=0.3.0
-langchain-google-genai>=2.0.0
+langchain-core>=0.3.0
+langchain-google-genai>=2.0.0   # Gemini (recommended)
+langchain-openai>=0.2.0          # OpenAI + DeepSeek (OpenAI-compatible)
+langchain-anthropic>=0.2.0       # Claude
 langchain-mcp-adapters>=0.1.0

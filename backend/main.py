@@ -8,8 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.agent import run_agent_loop
 from backend.api.routers import drones, map, mission, survivors, websocket
-from backend.core.config import LLM_PROVIDER  # noqa: F401 — loaded for env validation
 from backend.core.websocket import ConnectionManager
 from backend.models.mission import ScenarioKey
 from backend.simulation import Simulation
@@ -31,8 +31,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     app.state.sim = sim
     app.state.manager = manager
 
+    # Agent loop runs independently (slow LLM response never freezes the sim)
+    agent_task = asyncio.create_task(run_agent_loop(sim, manager.broadcast))
+
     logger.info("Application startup complete.")
     yield
+
+    agent_task.cancel()
     sim.stop()
     logger.info("Application shutdown complete.")
 
