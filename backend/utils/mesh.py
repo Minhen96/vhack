@@ -39,8 +39,6 @@ def is_connected_to_base(
     visited: set[str] = {drone.id}
     queue: deque[Drone] = deque([drone])
 
-    drone_map = {d.id: d for d in all_drones}
-
     while queue:
         current = queue.popleft()
         for other in all_drones:

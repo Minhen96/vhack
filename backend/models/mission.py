@@ -38,6 +38,7 @@ class Survivor:
     rescued: bool = False
     detected_tick: int = -1
     rescued_tick: int = -1
+    time_since_detected: int = 0
     confirmed_by: list[str] = field(default_factory=list)   # drone IDs that confirmed
 
     def to_dict(self) -> dict:

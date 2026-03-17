@@ -13,7 +13,9 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable, Awaitable, cast
+
+from pydantic import SecretStr
 
 from langchain_core.tools import StructuredTool
 from langchain_anthropic import ChatAnthropic
@@ -64,12 +66,12 @@ _LLM_REGISTRY: dict[str, Callable[[], BaseChatModel]] = {
     ),
     "deepseek": lambda: ChatOpenAI(
         model="deepseek-chat",
-        openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
+        api_key=SecretStr(os.getenv("DEEPSEEK_API_KEY") or ""),
         base_url="https://api.deepseek.com",
         temperature=0.3,
     ),
     "openai": lambda: ChatOpenAI(model="gpt-4o-mini", temperature=0.3),
-    "claude": lambda: ChatAnthropic(model="claude-haiku-4-5-20251001", temperature=0.3),
+    "claude": lambda: ChatAnthropic(model_name="claude-haiku-4-5-20251001", temperature=0.3, timeout=None, stop=None),
 }
 
 
@@ -95,7 +97,7 @@ async def build_tools() -> list[StructuredTool]:
     mcp_tools = await mcp.list_tools()
     return [
         StructuredTool.from_function(
-            func=tool.fn,
+            func=cast(Any, tool).fn,
             name=tool.name,
             description=tool.description or "",
         )

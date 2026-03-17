@@ -6,7 +6,6 @@ from backend.core.config import (
     HEATMAP_DECAY_RATE,
     HEATMAP_DETECT_BOOST,
     HEATMAP_NEIGHBOR_BOOST,
-    GRID_SIZE,
 )
 
 if TYPE_CHECKING:
