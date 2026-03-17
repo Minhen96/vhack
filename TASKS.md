@@ -75,26 +75,29 @@ Phase A complete: 2026-03-17
 
 ---
 
-## Phase D — Frontend 2D
+## Phase D — Frontend 2D ✅
+> Stack: Vite + React 18 + TypeScript strict + Tailwind + Zustand
 > Goal: Live 2D map, drone list, mission log — all driven by WebSocket
 
-- [ ] Next.js 14 project scaffold with Tailwind, TypeScript strict mode
-- [ ] `lib/types.ts` — Cell, Drone, Survivor, MissionStatus, WebSocket event types
-- [ ] `hooks/useSimulation.ts` — WebSocket connection, state sync, reconnect logic
-- [ ] `hooks/useMapOverlay.ts` — toggle overlay modes (heatmap, risk, mesh, coverage, paths)
-- [ ] `components/CommandMap2D.tsx` — canvas renderer, grid cells as colored squares
-- [ ] `CommandMap2D` — drone icons positioned by grid coords
-- [ ] `CommandMap2D` — survivor markers, fire cells, debris cells
-- [ ] `CommandMap2D` — cell click → detail tooltip
-- [ ] `CommandMap2D` — drone click → select drone, open detail panel
-- [ ] `CommandMap2D` — heatmap overlay (color gradient from probability)
-- [ ] `CommandMap2D` — path overlay (dashed lines to drone targets)
-- [ ] `CommandMap2D` — mesh overlay (lines between drones in range)
-- [ ] `components/DroneFleet.tsx` — drone list with battery bar, status, role, altitude
-- [ ] `components/MissionLog.tsx` — streaming agent chain-of-thought, auto-scroll
-- [ ] `components/MetricsPanel.tsx` — coverage %, survivors rescued, mesh health, ticks
-- [ ] `components/ScenarioSelector.tsx` — scenario picker, drone count config, start button
-- [ ] `app/page.tsx` — main layout wiring all components
+- [x] Vite + React + TypeScript strict scaffold (replaced Next.js — zero SSR needed)
+- [x] Tailwind CSS (PostCSS, dark command-center theme)
+- [x] Zustand store (`store/simulation.ts`) — single source of truth for all sim state
+- [x] `lib/types.ts` — Cell, Drone, Survivor, MissionStatus, all WebSocket event types
+- [x] `hooks/useSimulation.ts` — WebSocket connection, full state sync, auto-reconnect
+- [x] `hooks/useMapOverlay.ts` — toggle overlay modes (heatmap, risk, coverage, paths, mesh)
+- [x] `components/CommandMap2D.tsx` — canvas renderer, terrain/fire/debris cells
+- [x] `CommandMap2D` — drone icons positioned by grid coords, role colours, leader crown
+- [x] `CommandMap2D` — survivor markers (yellow=stable, red=critical, grey=rescued)
+- [x] `CommandMap2D` — cell hover → detail tooltip (terrain, fire, confidence, probability)
+- [x] `CommandMap2D` — drone click → select drone
+- [x] `CommandMap2D` — heatmap overlay (gradient from probability)
+- [x] `CommandMap2D` — path overlay (dashed lines to drone targets)
+- [x] `CommandMap2D` — mesh overlay (lines between drones in comm range)
+- [x] `components/DroneFleet.tsx` — drone list, battery bar, role badge, status, altitude
+- [x] `components/MissionLog.tsx` — streaming ARIA chain-of-thought, phase badges, auto-scroll
+- [x] `components/MetricsPanel.tsx` — phase, tick, coverage %, survivors, connection status
+- [x] `components/ScenarioSelector.tsx` — scenario picker, start/reset via REST
+- [x] `App.tsx` — main layout wiring all components, overlay controls, pause/resume/reset
 - [ ] Test: full mission playable in browser with live updates
 
 ---
@@ -140,3 +143,4 @@ Phase A complete: 2026-03-17
 - [x] 2026-03-17 — Backend refactored to industry-standard structure (core/, api/, routers split, DI pattern, standardised API responses)
 - [x] 2026-03-17 — Phase B complete: all MCP tools implemented in mcp_server.py
 - [x] 2026-03-17 — Phase C complete: ARIA agent loop, LLM provider switch, memory, WS streaming
+- [x] 2026-03-17 — Phase D complete: Vite+React frontend, canvas map, drone fleet, ARIA log, scenario selector
