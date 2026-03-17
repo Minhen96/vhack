@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from backend.constants import (
+from backend.core.config import (
     HEATMAP_DECAY_RATE,
     HEATMAP_DETECT_BOOST,
     HEATMAP_NEIGHBOR_BOOST,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from starlette.requests import HTTPConnection
 
 from backend.simulation import Simulation
-from backend.ws import ConnectionManager
+from backend.core.ws import ConnectionManager
 
 
 def get_sim(conn: HTTPConnection) -> Simulation:

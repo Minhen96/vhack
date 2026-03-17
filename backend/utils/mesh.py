@@ -4,7 +4,7 @@ import math
 from collections import deque
 from typing import TYPE_CHECKING
 
-from backend.constants import BASE_X, BASE_Y, BASE_COMM_RANGE
+from backend.core.config import BASE_X, BASE_Y, BASE_COMM_RANGE
 
 if TYPE_CHECKING:
     from backend.models.drone import Drone

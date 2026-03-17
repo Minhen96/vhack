@@ -4,13 +4,15 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from backend.api.routers import drones, map, mission, survivors, websocket
+from backend.core.config import LLM_PROVIDER  # noqa: F401 — loaded for env validation
+from backend.core.ws import ConnectionManager
 from backend.models.mission import ScenarioKey
-from backend.routers import drones, map, mission, survivors, ws
 from backend.simulation import Simulation
-from backend.ws import ConnectionManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,8 +26,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     manager = ConnectionManager()
     sim = Simulation()
     sim.set_broadcast(manager.broadcast)
-
-    # load dummy scenario
     sim.load_scenario(ScenarioKey.EARTHQUAKE_ALPHA)
 
     app.state.sim = sim
@@ -50,4 +50,13 @@ app.include_router(map.router)
 app.include_router(drones.router)
 app.include_router(survivors.router)
 app.include_router(mission.router)
-app.include_router(ws.router)
+app.include_router(websocket.router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled error on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error."},
+    )

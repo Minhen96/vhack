@@ -3,7 +3,7 @@ from __future__ import annotations
 import heapq
 from typing import TYPE_CHECKING
 
-from backend.constants import (
+from backend.core.config import (
     RISK_DEBRIS_PER_LEVEL,
     RISK_FIRE_PENALTY,
     RISK_WATER_PENALTY,

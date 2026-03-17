@@ -8,7 +8,7 @@ import random
 from pathlib import Path
 from typing import Callable, Awaitable
 
-from backend.constants import (
+from backend.core.config import (
     GRID_SIZE,
     TICK_RATE,
     BASE_X,

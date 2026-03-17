@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from backend.deps import get_sim
+from backend.core.deps import get_sim
 from backend.simulation import Simulation
 
 router = APIRouter(prefix="/api", tags=["map"])

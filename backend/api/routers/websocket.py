@@ -5,9 +5,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
-from backend.deps import get_manager, get_sim
+from backend.core.deps import get_manager, get_sim
+from backend.core.ws import ConnectionManager
 from backend.simulation import Simulation
-from backend.ws import ConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ async def websocket_updates(
 ) -> None:
     await manager.connect(ws)
     try:
-        # Send full state snapshot so client can render immediately on connect
+        # Send full state snapshot so the client can render immediately on connect
         await manager.send_to(
             ws,
             {

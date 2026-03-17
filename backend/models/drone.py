@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from backend.constants import (
+from backend.core.config import (
     ALTITUDE_CRUISING,
     ALTITUDE_TRANSITION_SPEED,
     BATTERY_DRAIN,
