@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from backend.api.routers import drones, map, mission, survivors, websocket
 from backend.core.config import LLM_PROVIDER  # noqa: F401 — loaded for env validation
-from backend.core.ws import ConnectionManager
+from backend.core.websocket import ConnectionManager
 from backend.models.mission import ScenarioKey
 from backend.simulation import Simulation
 

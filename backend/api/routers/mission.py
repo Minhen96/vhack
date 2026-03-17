@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from backend.api.schemas import CommandResult
 from backend.core.deps import get_manager, get_sim
-from backend.core.ws import ConnectionManager
+from backend.core.websocket import ConnectionManager
 from backend.models.mission import ScenarioKey
 from backend.simulation import Simulation
 

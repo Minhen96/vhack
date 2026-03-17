@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from backend.core.deps import get_manager, get_sim
-from backend.core.ws import ConnectionManager
+from backend.core.websocket import ConnectionManager
 from backend.simulation import Simulation
 
 logger = logging.getLogger(__name__)

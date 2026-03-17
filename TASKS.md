@@ -39,19 +39,19 @@ Phase A complete: 2026-03-17
 
 ---
 
-## Phase B — MCP Server
+## Phase B — MCP Server ✅
 > Goal: All drone tools exposed and callable, tested manually
 
-- [ ] `mcp_server.py` — FastMCP app setup
-- [ ] Discovery tools: `list_active_drones()`, `get_drone_status()`
-- [ ] Movement tools: `move_to()`, `assign_sector()`
-- [ ] Sensing tools: `thermal_scan()`, `deep_scan()`
-- [ ] Resource tools: `get_battery_status()`, `return_to_base()`, `deploy_relay()`
-- [ ] Rescue tools: `dispatch_medic()`, `deliver_aid()`
-- [ ] Environment tools: `get_map_state()`, `get_heatmap()`, `get_mission_status()`
-- [ ] Swarm tools: `broadcast_finding()`, `request_confirmation()`
-- [ ] Verify: `deliver_aid()` only succeeds when `drone.altitude == DELIVERING (5)`
-- [ ] Verify: `thermal_scan()` applies +0.15 confidence bonus when `drone.altitude == SCANNING (15)`
+- [x] `mcp_server.py` — FastMCP app setup
+- [x] Discovery tools: `list_active_drones()`, `get_drone_status()`
+- [x] Movement tools: `move_to()`, `assign_sector()`
+- [x] Sensing tools: `thermal_scan()`, `deep_scan()`
+- [x] Resource tools: `get_battery_status()`, `return_to_base()`, `deploy_relay()`
+- [x] Rescue tools: `dispatch_medic()`, `deliver_aid()`
+- [x] Environment tools: `get_map_state()`, `get_heatmap()`, `get_mission_status()`
+- [x] Swarm tools: `broadcast_finding()`, `request_confirmation()`
+- [x] Verify: `deliver_aid()` only succeeds when `drone.altitude == DELIVERING (5)`
+- [x] Verify: `thermal_scan()` applies +0.15 confidence bonus when `drone.altitude == SCANNING (15)`
 - [ ] Manual test: all tools via MCP inspector / curl
 
 ---
@@ -137,3 +137,5 @@ Phase A complete: 2026-03-17
 ## Completed
 
 - [x] 2026-03-17 — Phase A complete: full backend simulation, models, utils, FastAPI + WebSocket server
+- [x] 2026-03-17 — Backend refactored to industry-standard structure (core/, api/, routers split, DI pattern, standardised API responses)
+- [x] 2026-03-17 — Phase B complete: all MCP tools implemented in mcp_server.py
