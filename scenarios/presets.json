@@ -1,0 +1,38 @@
+{
+  "EARTHQUAKE_ALPHA": {
+    "label": "Earthquake Alpha",
+    "grid_size": 30,
+    "disaster_type": "EARTHQUAKE",
+    "seed": 42,
+    "survivors": 5,
+    "drones": { "SCOUT": 2, "MEDIC": 1, "RELAY": 1 },
+    "fire_start_cells": 3,
+    "debris_density": 0.30,
+    "water_zones": false,
+    "aftershock_enabled": true
+  },
+  "TYPHOON_BETA": {
+    "label": "Typhoon Beta",
+    "grid_size": 30,
+    "disaster_type": "TYPHOON",
+    "seed": 99,
+    "survivors": 7,
+    "drones": { "SCOUT": 3, "MEDIC": 2, "RELAY": 1 },
+    "fire_start_cells": 0,
+    "debris_density": 0.20,
+    "water_zones": true,
+    "aftershock_enabled": false
+  },
+  "STRESS_TEST": {
+    "label": "Stress Test",
+    "grid_size": 30,
+    "disaster_type": "FIRE_DISASTER",
+    "seed": 7,
+    "survivors": 10,
+    "drones": { "SCOUT": 3, "MEDIC": 2, "RELAY": 2 },
+    "fire_start_cells": 8,
+    "debris_density": 0.15,
+    "water_zones": false,
+    "aftershock_enabled": true
+  }
+}
