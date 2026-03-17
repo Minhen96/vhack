@@ -77,10 +77,10 @@ def move_to(drone_id: str, x: int, y: int) -> dict:
     return _get_sim().command_move_to(drone_id, x, y)
 
 
-@mcp.tool()
 def assign_sector(drone_id: str, sector: str) -> dict:
     """
-    Assign a drone to a named quadrant for systematic coverage.
+    Internal helper — NOT exposed as an MCP tool.
+    Use move_to with specific coordinates from context instead.
 
     sector must be one of: NW, NE, SW, SE.
     The drone is sent to the centre of the chosen quadrant.
@@ -105,6 +105,24 @@ def assign_sector(drone_id: str, sector: str) -> dict:
         }
 
     tx, ty = sector_centres[sector_upper]
+
+    # If the sector centre is impassable (e.g. water in typhoon), spiral outward
+    # to find the nearest passable cell so the command never silently fails.
+    if not sim.grid[ty][tx].passable:
+        found = False
+        for radius in range(1, grid_size):
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    nx, ny = tx + dx, ty + dy
+                    if 0 <= nx < grid_size and 0 <= ny < grid_size and sim.grid[ny][nx].passable:
+                        tx, ty = nx, ny
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                break
+
     result = sim.command_move_to(drone_id, tx, ty)
     result["sector"] = sector_upper
     result["target_x"] = tx
@@ -297,6 +315,9 @@ def request_confirmation(x: int, y: int) -> dict:
         if d.role == DroneRole.SCOUT
         and d.status in (DroneStatus.IDLE, DroneStatus.SCANNING)
         and d.target != (x, y)
+        # Exclude drones whose square scan area already covers the target cell
+        # (scan covers cells where |dx| ≤ radius AND |dy| ≤ radius, not Manhattan)
+        and not (abs(d.x - x) <= d.scan_radius and abs(d.y - y) <= d.scan_radius)
     ]
 
     if not candidates:

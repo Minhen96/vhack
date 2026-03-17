@@ -37,7 +37,17 @@ async def start_mission(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     sim.start()
-    await manager.broadcast({"event": "mission_started", "data": sim.mission.to_dict()})
+    # Broadcast full state so all connected clients re-sync without reconnecting
+    await manager.broadcast({
+        "event": "init",
+        "data": {
+            "mission": sim.mission.to_dict(),
+            "drones": sim.query_drones(),
+            "survivors": sim.query_survivors(),
+            "grid": sim.query_map_state(),
+            "heatmap": sim.query_heatmap(),
+        },
+    })
     return CommandResult(success=True, detail=f"Mission started: {req.scenario.value}")
 
 
@@ -72,5 +82,15 @@ async def reset_mission(
 ) -> CommandResult:
     sim.stop()
     sim.load_scenario(ScenarioKey.EARTHQUAKE_ALPHA)
-    await manager.broadcast({"event": "mission_reset", "data": {}})
-    return CommandResult(success=True, detail="Mission reset to EARTHQUAKE_ALPHA.")
+    # Broadcast full fresh state so all clients clear stale data and re-sync
+    await manager.broadcast({
+        "event": "init",
+        "data": {
+            "mission": sim.mission.to_dict(),
+            "drones": sim.query_drones(),
+            "survivors": sim.query_survivors(),
+            "grid": sim.query_map_state(),
+            "heatmap": sim.query_heatmap(),
+        },
+    })
+    return CommandResult(success=True, detail="Mission reset.")

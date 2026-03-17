@@ -19,9 +19,13 @@ def _heuristic(a: tuple[int, int], b: tuple[int, int]) -> float:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
-def _cell_cost(cell: Cell, occupied: set[tuple[int, int]]) -> float:
+def _cell_cost(
+    cell: Cell,
+    occupied: set[tuple[int, int]],
+    hard_blocked: set[tuple[int, int]] | None = None,
+) -> float:
     """Movement cost for entering a cell."""
-    if not cell.passable:
+    if not cell.passable or (hard_blocked and (cell.x, cell.y) in hard_blocked):
         return RISK_WATER_PENALTY
 
     cost = 1.0
@@ -41,15 +45,17 @@ def find_path(
     start: tuple[int, int],
     goal: tuple[int, int],
     occupied: set[tuple[int, int]] | None = None,
+    hard_blocked: set[tuple[int, int]] | None = None,
 ) -> list[tuple[int, int]]:
     """
     A* pathfinding with risk-weighted costs.
 
     Args:
-        grid:     2-D grid indexed as grid[y][x].
-        start:    (x, y) starting position.
-        goal:     (x, y) destination.
-        occupied: cells softly penalised (other drones).
+        grid:         2-D grid indexed as grid[y][x].
+        start:        (x, y) starting position.
+        goal:         (x, y) destination.
+        occupied:     cells softly penalised (other drones).
+        hard_blocked: cells treated as impassable (e.g. idle drones on a replan).
 
     Returns:
         Ordered list of (x, y) steps from start (exclusive) to goal (inclusive).
@@ -94,7 +100,7 @@ def find_path(
                 continue
 
             neighbor_cell = grid[ny][nx]
-            cost = _cell_cost(neighbor_cell, occupied)
+            cost = _cell_cost(neighbor_cell, occupied, hard_blocked)
             if cost >= RISK_WATER_PENALTY:
                 continue  # impassable
 

@@ -281,22 +281,106 @@ export function CommandMap2D({
   )
 
   return (
-    <div className="relative">
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_SIZE}
-        height={CANVAS_SIZE}
-        className="w-full h-full cursor-crosshair"
-        style={{ imageRendering: 'pixelated' }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setTooltip(null)}
-        onClick={handleClick}
-      />
-      {tooltip && (
-        <CellTooltip
-          tooltip={tooltip}
-          canvasWidth={canvasRef.current?.getBoundingClientRect().width ?? CANVAS_SIZE}
+    <div className="flex flex-col gap-1">
+      <div className="relative">
+        <canvas
+          ref={canvasRef}
+          width={CANVAS_SIZE}
+          height={CANVAS_SIZE}
+          className="w-full h-full cursor-crosshair"
+          style={{ imageRendering: 'pixelated' }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setTooltip(null)}
+          onClick={handleClick}
         />
+        {tooltip && (
+          <CellTooltip
+            tooltip={tooltip}
+            canvasWidth={canvasRef.current?.getBoundingClientRect().width ?? CANVAS_SIZE}
+          />
+        )}
+      </div>
+      <MapLegend overlay={overlay} />
+    </div>
+  )
+}
+
+// ── Legend ────────────────────────────────────────────────────────────────
+
+const TERRAIN_LEGEND = [
+  { colour: '#7f1d1d', label: 'Fire' },
+  { colour: '#1a2035', label: 'Open' },
+  { colour: '#3d3522', label: 'Debris' },
+  { colour: '#4a3f2f', label: 'Rubble' },
+  { colour: '#1a3050', label: 'Water' },
+]
+
+const DRONE_LEGEND = [
+  { colour: '#22c55e', label: 'Scout' },
+  { colour: '#f59e0b', label: 'Medic' },
+  { colour: '#60a5fa', label: 'Relay' },
+]
+
+const OVERLAY_LEGEND: Record<string, { label: string; items: { colour: string; label: string }[] }> = {
+  heatmap: {
+    label: 'Survivor probability',
+    items: [
+      { colour: '#1a2035', label: 'Low' },
+      { colour: '#f97316', label: 'Medium' },
+      { colour: '#ef4444', label: 'High' },
+    ],
+  },
+  risk: {
+    label: 'Navigation cost',
+    items: [
+      { colour: '#192030', label: 'Safe' },
+      { colour: '#3d3010', label: 'Debris' },
+      { colour: '#7f1d1d', label: 'Fire' },
+      { colour: '#1f1f1f', label: 'Blocked' },
+    ],
+  },
+  coverage: {
+    label: 'Scan confidence',
+    items: [
+      { colour: '#1a2035', label: 'Unsearched' },
+      { colour: '#1d4ed8', label: 'Low' },
+      { colour: '#22c55e', label: 'High' },
+    ],
+  },
+}
+
+function MapLegend({ overlay }: { overlay: OverlayMode }) {
+  const overlayInfo = overlay !== 'none' ? OVERLAY_LEGEND[overlay] : null
+  const items = overlayInfo ? overlayInfo.items : TERRAIN_LEGEND
+
+  return (
+    <div className="flex items-center gap-3 px-1 flex-wrap">
+      <span className="text-muted text-[10px] uppercase tracking-widest">
+        {overlayInfo ? overlayInfo.label : 'Terrain'}:
+      </span>
+      {items.map((item) => (
+        <span key={item.label} className="flex items-center gap-1 text-[10px] text-muted">
+          <span
+            className="inline-block w-2.5 h-2.5 rounded-sm border border-white/10 shrink-0"
+            style={{ backgroundColor: item.colour }}
+          />
+          {item.label}
+        </span>
+      ))}
+      {overlay === 'none' && (
+        <>
+          <span className="text-border">|</span>
+          <span className="text-muted text-[10px] uppercase tracking-widest">Drones:</span>
+          {DRONE_LEGEND.map((item) => (
+            <span key={item.label} className="flex items-center gap-1 text-[10px] text-muted">
+              <span
+                className="inline-block w-2.5 h-2.5 rounded-full border border-white/10 shrink-0"
+                style={{ backgroundColor: item.colour }}
+              />
+              {item.label}
+            </span>
+          ))}
+        </>
       )}
     </div>
   )

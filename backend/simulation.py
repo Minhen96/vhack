@@ -61,6 +61,7 @@ class Simulation:
         self.mission: Mission = Mission()
         self._broadcast: BroadcastFn | None = None
         self._tick_task: asyncio.Task | None = None
+        self._stuck_ticks: dict[str, int] = {}  # drone_id → consecutive ticks blocked
 
     # ── Public setup ──────────────────────────────────────────────────────────
 
@@ -70,6 +71,7 @@ class Simulation:
 
     def load_scenario(self, scenario_key: str | ScenarioKey) -> None:
         """Load scenario config and initialise grid + drones."""
+        self._stuck_ticks.clear()
         key = ScenarioKey(scenario_key)  # validates and normalises the value
 
         with _SCENARIOS_PATH.open() as f:
@@ -193,17 +195,46 @@ class Simulation:
         moved: set[str] = set()
         occupied = {(d.x, d.y) for d in self.drones.values()}
 
+        # Positions of drones that won't self-clear this tick
+        stationary_positions = {
+            (d.x, d.y) for d in self.drones.values()
+            if d.status in (DroneStatus.IDLE, DroneStatus.CHARGING, DroneStatus.SCANNING)
+        }
+
         for drone in self.drones.values():
-            if drone.status != DroneStatus.MOVING or not drone.path:
+            if drone.status not in (
+                DroneStatus.MOVING, DroneStatus.RETURNING, DroneStatus.DELIVERING
+            ) or not drone.path:
+                self._stuck_ticks.pop(drone.id, None)
                 continue
 
             next_cell_coord = drone.path[0]
-            nx, ny = next_cell_coord
 
-            # Soft collision: skip this tick if next cell is occupied
+            # Soft collision: next cell is occupied by another drone
             if next_cell_coord in occupied and next_cell_coord != (drone.x, drone.y):
+                count = self._stuck_ticks.get(drone.id, 0) + 1
+                self._stuck_ticks[drone.id] = count
+                # Immediately replan if blocked by a stationary drone (won't self-clear);
+                # wait up to 3 ticks for a moving drone to clear before replanning.
+                should_replan = (
+                    next_cell_coord in stationary_positions
+                    or count >= 3
+                )
+                if should_replan and drone.target:
+                    new_path = find_path(
+                        self.grid,
+                        drone.position,
+                        drone.target,
+                        occupied - {drone.position},
+                        hard_blocked=stationary_positions - {drone.position},
+                    )
+                    if new_path:
+                        drone.path = new_path
+                        self._stuck_ticks[drone.id] = 0
                 continue
 
+            nx, ny = next_cell_coord
+            self._stuck_ticks.pop(drone.id, None)
             occupied.discard((drone.x, drone.y))
             drone.x, drone.y = nx, ny
             drone.path = drone.path[1:]
@@ -222,7 +253,7 @@ class Simulation:
             drone.status = DroneStatus.CHARGING
             drone.altitude_state = AltitudeState.CRUISING
         else:
-            if drone.status == DroneStatus.MOVING:
+            if drone.status in (DroneStatus.MOVING, DroneStatus.RETURNING):
                 drone.status = DroneStatus.IDLE
             drone.target = None
 

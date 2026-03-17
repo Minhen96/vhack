@@ -84,13 +84,18 @@ export const useSimStore = create<SimulationState>((set, get) => ({
   initState: (grid, drones, survivors, mission, heatmap) =>
     set({ grid, drones, survivors, mission, heatmap, agentLog: [], nextLogId: 0 }),
 
-  applyTickDelta: (changedCells, drones, mission) =>
+  applyTickDelta: (changedCells, updatedDrones, mission) =>
     set((state) => {
       const newGrid = state.grid.map((row) => [...row])
       for (const cell of changedCells) {
         newGrid[cell.y][cell.x] = cell
       }
-      return { grid: newGrid, drones, mission }
+      // Tick only sends changed drones — merge into existing list, don't replace
+      const droneMap = new Map(state.drones.map((d) => [d.id, d]))
+      for (const drone of updatedDrones) {
+        droneMap.set(drone.id, drone)
+      }
+      return { grid: newGrid, drones: Array.from(droneMap.values()), mission }
     }),
 
   updateDroneAltitude: (droneId, altitude) =>

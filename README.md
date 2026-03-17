@@ -70,12 +70,12 @@ cp .env.example .env
 
 Open `.env` and set one provider:
 
-| Provider | Env key | Model used |
-|----------|---------|------------|
-| **Gemini** ✅ recommended (free tier) | `GOOGLE_API_KEY` | `gemini-2.0-flash` |
-| **DeepSeek** ✅ cheapest | `DEEPSEEK_API_KEY` | `deepseek-chat` |
-| **OpenAI** | `OPENAI_API_KEY` | `gpt-4o-mini` |
-| **Claude** | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` |
+| Provider     | Env key             | Model used         |
+| ------------ | ------------------- | ------------------ |
+| **Gemini**   | `GOOGLE_API_KEY`    | `gemini-2.0-flash` |
+| **DeepSeek** | `DEEPSEEK_API_KEY`  | `deepseek-chat`    |
+| **OpenAI**   | `OPENAI_API_KEY`    | `gpt-4o-mini`      |
+| **Claude**   | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` |
 
 Then set `LLM_PROVIDER=gemini` (or `deepseek` / `openai` / `claude`) in the same `.env`.
 
@@ -95,17 +95,17 @@ INFO: Uvicorn running on http://127.0.0.1:8000
 
 ## REST API
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/map` | Full 30×30 grid — terrain, fire, debris, survivor data |
-| GET | `/api/drones` | All drone positions, battery, status, altitude |
-| GET | `/api/mission` | Phase, coverage %, survivors rescued, mesh health |
-| GET | `/api/survivors` | Survivor list with conditions and detection state |
-| GET | `/api/heatmap` | 30×30 probability array (0.0–1.0) |
-| POST | `/api/mission/start` | Start mission `{"scenario": "EARTHQUAKE_ALPHA"}` |
-| POST | `/api/mission/pause` | Pause simulation |
-| POST | `/api/mission/resume` | Resume simulation |
-| POST | `/api/mission/reset` | Reset to fresh map |
+| Method | Endpoint              | Description                                            |
+| ------ | --------------------- | ------------------------------------------------------ |
+| GET    | `/api/map`            | Full 30×30 grid — terrain, fire, debris, survivor data |
+| GET    | `/api/drones`         | All drone positions, battery, status, altitude         |
+| GET    | `/api/mission`        | Phase, coverage %, survivors rescued, mesh health      |
+| GET    | `/api/survivors`      | Survivor list with conditions and detection state      |
+| GET    | `/api/heatmap`        | 30×30 probability array (0.0–1.0)                      |
+| POST   | `/api/mission/start`  | Start mission `{"scenario": "EARTHQUAKE_ALPHA"}`       |
+| POST   | `/api/mission/pause`  | Pause simulation                                       |
+| POST   | `/api/mission/resume` | Resume simulation                                      |
+| POST   | `/api/mission/reset`  | Reset to fresh map                                     |
 
 All POST endpoints return a standard `CommandResult`:
 ```json
@@ -124,18 +124,18 @@ Receives a full state snapshot on connect (`init` event), then delta updates eac
 
 ## WebSocket Event Types
 
-| Event | When | Payload |
-|-------|------|---------|
-| `init` | On connect | Full grid, drones, survivors, mission |
-| `tick` | Every tick | Changed cells, moved drones, mission state |
-| `drone_altitude` | Altitude changes | `drone_id`, `altitude`, `state` |
-| `survivor_found` | Detection | `x`, `y`, `condition` |
-| `aid_delivered` | Rescue complete | `survivor_id`, `drone_id` |
-| `fire_spread` | Fire spreads | `new_fire_cells` |
-| `aftershock` | Every ~120 ticks | `affected_cells` |
-| `phase_change` | Phase transition | `from`, `to`, `tick` |
-| `leader_changed` | Leader election | `old`, `new` |
-| `agent_thought` | ARIA reasoning | `phase` (OBSERVE/THINKING/EXECUTE/RESULT), `text` |
+| Event            | When             | Payload                                           |
+| ---------------- | ---------------- | ------------------------------------------------- |
+| `init`           | On connect       | Full grid, drones, survivors, mission             |
+| `tick`           | Every tick       | Changed cells, moved drones, mission state        |
+| `drone_altitude` | Altitude changes | `drone_id`, `altitude`, `state`                   |
+| `survivor_found` | Detection        | `x`, `y`, `condition`                             |
+| `aid_delivered`  | Rescue complete  | `survivor_id`, `drone_id`                         |
+| `fire_spread`    | Fire spreads     | `new_fire_cells`                                  |
+| `aftershock`     | Every ~120 ticks | `affected_cells`                                  |
+| `phase_change`   | Phase transition | `from`, `to`, `tick`                              |
+| `leader_changed` | Leader election  | `old`, `new`                                      |
+| `agent_thought`  | ARIA reasoning   | `phase` (OBSERVE/THINKING/EXECUTE/RESULT), `text` |
 
 ---
 
@@ -201,14 +201,14 @@ asyncio.run(run())
 
 ## Build Phases
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| A | ✅ Done | Simulation engine, models, pathfinding, FastAPI + WebSocket |
-| B | ✅ Done | MCP server — 14 drone tools exposed via FastMCP |
-| C | ✅ Done | ARIA agent — LangGraph ReAct loop, provider switch, WS streaming |
-| D | 🔲 Next | Frontend — 2D map, drone list, mission log |
-| E | 🔲 | 3D drone view (React Three Fiber) |
-| F | 🔲 | Final polish, demo prep |
+| Phase | Status | Description                                                      |
+| ----- | ------ | ---------------------------------------------------------------- |
+| A     | ✅ Done | Simulation engine, models, pathfinding, FastAPI + WebSocket      |
+| B     | ✅ Done | MCP server — 14 drone tools exposed via FastMCP                  |
+| C     | ✅ Done | ARIA agent — LangGraph ReAct loop, provider switch, WS streaming |
+| D     | 🔲 Next | Frontend — 2D map, drone list, mission log                       |
+| E     | 🔲      | 3D drone view (React Three Fiber)                                |
+| F     | 🔲      | Final polish, demo prep                                          |
 
 ---
 
