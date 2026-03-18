@@ -605,3 +605,245 @@ Processing request of type CallToolRequest
 HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
 Terminating session: a2a4114fbecf40fd88c31fed742a68bf
 HTTP Request: DELETE http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Created new transport with session ID: fb01c8e3dd3a496bbe8ebba6346ed2d7
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Received session ID: fb01c8e3dd3a496bbe8ebba6346ed2d7
+Negotiated protocol version: 2025-11-25
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: GET http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type ListToolsRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+HTTP Request: POST http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+HTTP Request: POST https://api.deepseek.com/v1/chat/completions "HTTP/1.1 200 OK"
+Terminating session: fb01c8e3dd3a496bbe8ebba6346ed2d7
+HTTP Request: DELETE http://localhost:8000/mcp/mcp "HTTP/1.1 200 OK"
+Processing request of type CallToolRequest
+Created new transport with session ID: ca0485d7f2454733bdd99ac2880fc793
+Processing request of type ListToolsRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
+Processing request of type CallToolRequest
