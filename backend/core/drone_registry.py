@@ -73,6 +73,17 @@ class DroneRegistry:
         self._drones.clear()
         self._seed_fleet()
 
+    def register(self, drone: DroneState) -> None:
+        """Register a new drone (or re-register an existing one)."""
+        self._drones[drone.drone_id] = drone
+
+    def deregister(self, drone_id: str) -> bool:
+        """Remove a drone from the registry. Returns True if it existed."""
+        if drone_id in self._drones:
+            del self._drones[drone_id]
+            return True
+        return False
+
     def find_nearest_idle(
         self, from_x: int, from_y: int, from_z: int, exclude_id: str
     ) -> DroneState | None:

@@ -24,3 +24,6 @@ class DroneState(BaseModel):
     status: DroneStatus
     capabilities: list[DroneCapability]
     current_task: str | None = None
+    type: str | None = None        # drone type reported at registration
+    host: str | None = None        # drone's own HTTP host
+    port: int | None = None        # drone's own HTTP port

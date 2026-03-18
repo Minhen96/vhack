@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.routers.drone import router as drone_router
 from backend.api.routers.mission import router as mission_router
 from backend.mcp.server import mcp
 
@@ -42,6 +43,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Drone registration endpoints
+app.include_router(drone_router)
 
 # Mission control API
 app.include_router(mission_router)
