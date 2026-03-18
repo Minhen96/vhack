@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -61,6 +62,11 @@ class Drone:
     fov: float = DRONE_FOV
 
     capabilities: list[str] = field(init=False)
+
+    # Background task that gradually charges battery while at base.
+    # Stored here so it can be cancelled (e.g. drone dispatched mid-charge)
+    # and to prevent duplicate charge tasks if return_to_base is called twice.
+    _charge_task: asyncio.Task | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         # Full capability list = type-specific + common (sent to MCP and Map Engine on startup)

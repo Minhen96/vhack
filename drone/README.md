@@ -43,11 +43,22 @@ Map Engine
 1. LLM decides where to go → MCP calls `POST /drones/{id}/move`
 2. Drone looks up latest obstacle cache (from Map Engine WS, zero extra I/O)
 3. A* plans a path around blocked cells
-4. Drone walks step-by-step — before **every single cell**, re-runs A* with the freshest obstacle data
+4. Drone walks step-by-step — before **every single cell**, re-runs A* with the freshest obstacle data (never commits to a full path upfront)
 5. After each step: sends updated position + camera direction to Map Engine
 6. Map Engine sends back any grid changes that happened mid-path (new rubble, other drones moving)
 7. Drone re-routes on the fly if the path changed
 8. LLM gets back `"arrived"` or `"blocked"` — it never thinks about obstacles
+
+**Return to base flow:**
+1. LLM calls `POST /drones/{id}/return`
+2. Drone navigates home via A* (same obstacle avoidance as move)
+3. On arrival, starts gradual charge at `BATTERY_CHARGE_RATE`%/s (configurable in `constants.py`)
+4. Map Engine receives a `send_drone_status` update every second showing battery rising
+5. LLM gets back `"arrived"` with `eta_seconds` (manhattan estimate) and current `battery_pct`
+
+**WebSocket reconnect:**
+- If Map Engine goes down, drone retries connection every 5 seconds automatically
+- On reconnect, re-sends `init_connection` so Map Engine knows the drone is back
 
 ---
 
@@ -144,7 +155,7 @@ To run multiple drones, copy `.env` with a different `DRONE_PORT` and `DRONE_TYP
 drone/
 ├── main.py               # FastAPI app, lifespan (startup/shutdown)
 ├── functions.py          # Core drone logic (move_to, scan, deliver, ...)
-├── pathfinding.py        # A* on 2D grid
+├── pathfinding.py        # A* pathfinding — finds shortest path avoiding blocked cells
 ├── registry.py           # Single drone instance per process
 ├── constants.py          # All tuneable numbers in one place
 ├── models/

@@ -70,7 +70,7 @@ class StatusResult(BaseModel):
 class ReturnResult(BaseModel):
     drone_id: str
     success: bool
-    status: Literal["arrived"]
+    status: Literal["arrived", "blocked"]
     position: Position                     # base position after returning
     battery_pct: float
     message: str

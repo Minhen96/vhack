@@ -38,6 +38,10 @@ class MapEngineClient:
         # Background asyncio task that reads incoming WS messages from map engine.
         self._listener_task: asyncio.Task | None = None
 
+        # Drone reference stored on first send_init_connection so the receive loop
+        # can re-announce the drone to Map Engine after a reconnect without needing it passed in.
+        self._drone: Drone | None = None
+
     async def connect(self) -> None:
         try:
             self._ws = await asyncio.wait_for(
@@ -51,7 +55,8 @@ class MapEngineClient:
     async def start_listener(self) -> None:
         """Start a background task that reads incoming WS messages from map engine.
 
-        Must be called after connect(). Safe to call when not connected (no-op).
+        Safe to call even when not currently connected — the receive loop handles
+        reconnection internally and will keep retrying until the app shuts down.
 
         Map engine pushes two message types to the drone:
           grid_snapshot — full blocked-cell list on connect (or after a map reload).
@@ -63,15 +68,32 @@ class MapEngineClient:
         The listener keeps _blocked current so A* always uses fresh obstacle data
         without any extra HTTP request.
         """
-        if self._ws is None:
-            return
         self._listener_task = asyncio.create_task(self._receive_loop())
         logger.info("Map Engine listener started.")
 
     async def _receive_loop(self) -> None:
-        """Continuously read and dispatch incoming messages from map engine."""
+        """Continuously read messages from map engine, reconnecting on disconnect.
+
+        Reconnect logic:
+        - On connection drop, waits 5 seconds then retries connect().
+        - Retries indefinitely until the app shuts down (close() cancels this task).
+        - On reconnect, map engine should push a fresh grid_snapshot automatically.
+        """
         import json
-        while self._ws is not None:
+        while True:
+            if self._ws is None:
+                # Connection lost — wait then try to reconnect
+                logger.info("Map Engine listener: retrying connection in 5s...")
+                await asyncio.sleep(5.0)
+                await self.connect()
+                if self._ws is None:
+                    continue   # still not up, loop and wait again
+                logger.info("Map Engine reconnected — resuming listener.")
+                # Re-announce the drone so Map Engine knows who this connection belongs to.
+                # Without this, Map Engine has no record of this drone after its restart.
+                if self._drone:
+                    await self.send_init_connection(self._drone)
+
             try:
                 raw = await self._ws.recv()
                 msg = json.loads(raw)
@@ -99,12 +121,15 @@ class MapEngineClient:
                         logger.debug("grid_update: (%d,%d) blocked", *cell)
 
             except websockets.ConnectionClosed:
-                logger.warning("Map Engine WS closed — listener stopping.")
+                logger.warning("Map Engine WS closed — will reconnect in 5s.")
                 self._ws = None
+                # loop continues — reconnect block at top will handle it
+            except asyncio.CancelledError:
+                # close() cancelled this task — exit cleanly
                 break
             except Exception:
-                logger.exception("Unexpected error in map listener — listener stopping.")
-                break
+                logger.exception("Unexpected error in map listener.")
+                self._ws = None
 
     def get_blocked(self) -> set[tuple[int, int]]:
         """Return the current set of impassable (x, y) cells.
@@ -139,6 +164,8 @@ class MapEngineClient:
             logger.exception("Failed to send message to Map Engine.")
 
     async def send_init_connection(self, drone: Drone) -> None:
+        # Store drone ref so the reconnect loop can re-announce without needing it passed in
+        self._drone = drone
         await self._send({
             "intention": "init_connection",
             "drone_id": drone.id,

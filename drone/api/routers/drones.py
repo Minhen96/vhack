@@ -69,11 +69,16 @@ async def scan(drone_id: str, body: ScanRequest = ScanRequest()) -> ScanResult:
 @router.post("/{drone_id}/deliver", response_model=DeliverResult)
 async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
     drone = _lookup(drone_id)
-    result = await deliver_aid(drone, body.x, body.y, body.z)
-    # Notify Map Engine: aid delivered at location + drone position updated
+
+    # Same as move — stream position updates to Map Engine at each step during approach
+    async def on_waypoint(d: Drone, step_dist: int) -> None:
+        await map_client.send_position(d, step_dist)
+        await map_client.send_drone_status(d)
+
+    result = await deliver_aid(drone, body.x, body.y, body.z, on_waypoint=on_waypoint)
+    # Notify Map Engine: aid delivered at location + final status
     if result.status == "delivered":
         await map_client.send_aid_delivered(drone, body.x, body.y, body.z)
-    await map_client.send_position(drone)
     await map_client.send_drone_status(drone)
     return result
 
@@ -81,9 +86,19 @@ async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
 @router.post("/{drone_id}/return", response_model=ReturnResult)
 async def recall(drone_id: str) -> ReturnResult:
     drone = _lookup(drone_id)
-    result = await return_to_base(drone)
-    # Notify Map Engine: drone is back at base and charging
-    await map_client.send_position(drone)
+
+    # Stream position updates to Map Engine at each step during the trip home
+    async def on_waypoint(d: Drone, step_dist: int) -> None:
+        await map_client.send_position(d, step_dist)
+        await map_client.send_drone_status(d)
+
+    # Push live battery updates every second while charging so Map Engine
+    # sees the battery rising in real-time without needing to poll
+    async def on_tick(d: Drone) -> None:
+        await map_client.send_drone_status(d)
+
+    result = await return_to_base(drone, on_waypoint=on_waypoint, on_tick=on_tick)
+    # Final status push — charging or blocked
     await map_client.send_drone_status(drone)
     return result
 
