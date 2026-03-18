@@ -268,7 +268,7 @@ func (d *MockDrone) WaitForGridSnapshot() error {
 		return fmt.Errorf("not connected")
 	}
 
-	log.Println("⏳ Waiting for grid_snapshot...")
+	log.Println("⏳ Waiting for init_connection/grid_snapshot...")
 
 	// Set read deadline
 	d.conn.SetReadDeadline(time.Now().Add(initialReadTimeout))
@@ -288,9 +288,65 @@ func (d *MockDrone) WaitForGridSnapshot() error {
 		return fmt.Errorf("message type not found")
 	}
 
-	if msgType == MessageTypeGridSnapshot {
+	log.Printf("🔍 DEBUG: Received message type: '%s' (looking for: 'init_connection' or 'grid_snapshot')", msgType)
+
+	// Handle init_connection response (server sends this type, NOT grid_snapshot)
+	if msgType == MessageTypeInitConnection {
+		log.Printf("📥 Received init_connection response:")
+		log.Printf("   %s", formatJSON(message))
+		
+		// Extract position from the init_connection response
+		if position, ok := msg["position"].(map[string]interface{}); ok {
+			posX, _ := position["x"].(float64)
+			posY, _ := position["y"].(float64)
+			posZ, _ := position["z"].(float64)
+			log.Printf("🔍 DEBUG: Initial position from server: X=%.2f, Y=%.2f, Z=%.2f", posX, posY, posZ)
+			log.Printf("🔍 DEBUG: Current drone position BEFORE update: X=%.2f, Z=%.2f, Altitude=%.2f", d.currentX, d.currentZ, d.altitude)
+			
+			// Force drone to exact Command Base position from server
+			d.currentX = posX
+			d.currentZ = posZ  // Server sends Z as ground plane coordinate
+			d.altitude = posY  // Server sends Y as altitude (50 = Command Base altitude)
+			
+			log.Printf("🔍 DEBUG: Current drone position AFTER update: X=%.2f, Z=%.2f, Altitude=%.2f", d.currentX, d.currentZ, d.altitude)
+		}
+		
+		// Also extract command_base from grid_snapshot if present
+		if gridSnap, ok := msg["grid_snapshot"].(map[string]interface{}); ok {
+			if cmdBase, ok := gridSnap["command_base"].(map[string]interface{}); ok {
+				cmdBaseX, _ := cmdBase["x"].(float64)
+				cmdBaseY, _ := cmdBase["y"].(float64)
+				log.Printf("🔍 DEBUG: Command Base from server: X=%.2f, Y=%.2f", cmdBaseX, cmdBaseY)
+			}
+		}
+	} else if msgType == MessageTypeGridSnapshot {
 		log.Printf("📥 Received grid_snapshot:")
 		log.Printf("   %s", formatJSON(message))
+		
+		// DEBUG: Extract command_base coordinates from the response
+		if gridSnap, ok := msg["grid_snapshot"].(map[string]interface{}); ok {
+			if cmdBase, ok := gridSnap["command_base"].(map[string]interface{}); ok {
+				cmdBaseX, _ := cmdBase["x"].(float64)
+				cmdBaseY, _ := cmdBase["y"].(float64)
+				log.Printf("🔍 DEBUG: Command Base from server: X=%.2f, Y=%.2f", cmdBaseX, cmdBaseY)
+			}
+		}
+		
+		// DEBUG: Extract position from init_connection response
+		if position, ok := msg["position"].(map[string]interface{}); ok {
+			posX, _ := position["x"].(float64)
+			posY, _ := position["y"].(float64)
+			posZ, _ := position["z"].(float64)
+			log.Printf("🔍 DEBUG: Initial position from server: X=%.2f, Y=%.2f, Z=%.2f", posX, posY, posZ)
+			log.Printf("🔍 DEBUG: Current drone position BEFORE update: X=%.2f, Z=%.2f, Altitude=%.2f", d.currentX, d.currentZ, d.altitude)
+			
+			// Update drone position to match server's command base
+			d.currentX = posX
+			d.currentZ = posZ  // Server sends Z as ground plane coordinate
+			d.altitude = posY  // Server sends Y as altitude
+			
+			log.Printf("🔍 DEBUG: Current drone position AFTER update: X=%.2f, Z=%.2f, Altitude=%.2f", d.currentX, d.currentZ, d.altitude)
+		}
 	} else {
 		log.Printf("⚠️  Received unexpected message type: %s", msgType)
 	}

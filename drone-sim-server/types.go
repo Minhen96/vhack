@@ -73,9 +73,16 @@ type SurvivorDetected struct {
 
 // GridSnapshot represents a complete grid state broadcast to all connected clients
 type GridSnapshot struct {
-	Type      string         `json:"type"`
-	Timestamp int64          `json:"timestamp"`
-	Blocked   []BlockedArea  `json:"blocked"`
+	Type        string         `json:"type"`
+	Timestamp   int64          `json:"timestamp"`
+	Blocked     []BlockedArea  `json:"blocked"`
+	CommandBase *CommandBase   `json:"command_base,omitempty"`
+}
+
+// CommandBase represents the Command Base coordinates where drones spawn
+type CommandBase struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // BlockedArea represents an area of the grid that is blocked/obstructed

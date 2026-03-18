@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -77,6 +78,11 @@ func runServer() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// Generate random survivors for the simulation (5-10 survivors)
+	survivorCount := 5 + rand.Intn(6) // 5 to 10
+	log.Printf("🎯 Generating %d survivors for the disaster simulation...", survivorCount)
+	Survivors = GenerateSurvivors(survivorCount)
 
 	// Create a new Hub instance
 	hub := NewHub()
