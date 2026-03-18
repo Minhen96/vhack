@@ -12,7 +12,7 @@ langchain-community>=0.3.0
 
 # LLM providers (uncomment the one you use)
 # langchain-google-genai>=2.0.0   # Gemini
-# langchain-openai>=0.2.0         # OpenAI
+langchain-openai>=0.2.0           # OpenAI / DeepSeek (uses OpenAI-compatible API)
 # langchain-anthropic>=0.3.0      # Anthropic
 
 # Data validation

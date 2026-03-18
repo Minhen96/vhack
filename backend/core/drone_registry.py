@@ -68,6 +68,11 @@ class DroneRegistry:
         drone = self.get(drone_id)
         return drone is not None and drone.battery_pct < BATTERY_LOW_THRESHOLD
 
+    def reset(self) -> None:
+        """Reset fleet to initial state for a new mission."""
+        self._drones.clear()
+        self._seed_fleet()
+
     def find_nearest_idle(
         self, from_x: int, from_y: int, from_z: int, exclude_id: str
     ) -> DroneState | None:
