@@ -50,7 +50,7 @@ class Drone:
     base_z: int = BASE_Z
 
     # ── Camera orientation (spherical coordinates) ────────────────────────────
-    # azimuth:     horizontal facing direction in degrees (0 = east, 90 = north)
+    # azimuth:     horizontal facing direction in degrees (0 = north, 90 = east, compass CW)
     #              updated automatically on every move_to call
     # elevation:   vertical camera tilt in degrees (-90 = straight down, 0 = horizon)
     #              drones point their camera downward by default

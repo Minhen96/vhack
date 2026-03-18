@@ -60,6 +60,12 @@ Map Engine
 - If Map Engine goes down, drone retries connection every 5 seconds automatically
 - On reconnect, re-sends `init_connection` so Map Engine knows the drone is back
 
+**WebSocket send safety:**
+- All outbound messages go through an `asyncio.Queue` (capped at 256 entries)
+- A single `_write_pump` background task drains the queue and sends messages one at a time
+- This prevents payload corruption from concurrent sends on the same socket
+- If the queue is full (map engine unreachable), the oldest message is dropped to make room for the latest
+
 ---
 
 ## Endpoints
@@ -92,6 +98,7 @@ Interactive docs available at `http://localhost:{DRONE_PORT}/docs` when running.
 | `aid_delivered`     | After successful delivery | `x`, `y`, `z`                        |
 
 `spherical` contains `azimuth`, `elevation`, `scan_radius`, `fov` for Map Engine's 3D camera view.
+`azimuth` uses compass convention: 0 = North, 90 = East, clockwise.
 `eta_ms` = step distance × 200ms — tells Map Engine how long to lerp the drone position for smooth animation.
 
 ### Map Engine → Drone (inbound)

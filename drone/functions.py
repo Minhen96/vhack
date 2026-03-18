@@ -171,7 +171,7 @@ async def move_to(
         # Update azimuth to face the direction of travel
         dx, dy = wx - drone.x, wy - drone.y
         if dx != 0 or dy != 0:
-            drone.azimuth = math.degrees(math.atan2(-dy, dx)) % 360
+            drone.azimuth = math.degrees(math.atan2(dx, -dy)) % 360
 
         drone.x, drone.y, drone.z = wx, wy, z
         drone.status = moving_status  # MOVING by default, DELIVERING/RETURNING when called by those functions

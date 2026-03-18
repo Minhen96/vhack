@@ -38,6 +38,16 @@ class MapEngineClient:
         # Background asyncio task that reads incoming WS messages from map engine.
         self._listener_task: asyncio.Task | None = None
 
+        # Background asyncio task that drains _send_queue one message at a time.
+        # Ensures only one send() is in-flight at any moment — WebSocket is a single
+        # tube and parallel sends corrupt the stream.
+        self._pump_task: asyncio.Task | None = None
+
+        # All outbound messages are enqueued here; the write pump sends them serially.
+        # Capped at 256 — if the queue is full (map engine unreachable for a long time),
+        # the oldest message is discarded rather than growing memory unboundedly.
+        self._send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
+
         # Drone reference stored on first send_init_connection so the receive loop
         # can re-announce the drone to Map Engine after a reconnect without needing it passed in.
         self._drone: Drone | None = None
@@ -51,6 +61,29 @@ class MapEngineClient:
         except (OSError, asyncio.TimeoutError):
             logger.warning("Map Engine not reachable at %s — running without map sync.", MAP_WS_URL)
             self._ws = None
+
+    async def _write_pump(self) -> None:
+        """Drain _send_queue and send messages one-at-a-time over the WebSocket.
+
+        A WebSocket is a single TCP tube — concurrent sends corrupt the stream.
+        All _send() calls enqueue here; this pump serialises them.
+        Messages queued while disconnected are dropped (same behaviour as before).
+        """
+        import json
+        while True:
+            try:
+                payload = await self._send_queue.get()
+                if self._ws is not None:
+                    try:
+                        await self._ws.send(json.dumps(payload))
+                    except websockets.ConnectionClosed:
+                        logger.warning("Map Engine connection closed — message dropped.")
+                        self._ws = None
+                    except Exception:
+                        logger.exception("Failed to send message to Map Engine.")
+                self._send_queue.task_done()
+            except asyncio.CancelledError:
+                break
 
     async def start_listener(self) -> None:
         """Start a background task that reads incoming WS messages from map engine.
@@ -69,7 +102,8 @@ class MapEngineClient:
         without any extra HTTP request.
         """
         self._listener_task = asyncio.create_task(self._receive_loop())
-        logger.info("Map Engine listener started.")
+        self._pump_task = asyncio.create_task(self._write_pump())
+        logger.info("Map Engine listener and write pump started.")
 
     async def _receive_loop(self) -> None:
         """Continuously read messages from map engine, reconnecting on disconnect.
@@ -146,22 +180,28 @@ class MapEngineClient:
         if self._listener_task:
             self._listener_task.cancel()
             self._listener_task = None
+        if self._pump_task:
+            self._pump_task.cancel()
+            self._pump_task = None
         if self._ws:
             await self._ws.close()
             self._ws = None
             logger.info("Disconnected from Map Engine.")
 
     async def _send(self, payload: dict) -> None:
-        if self._ws is None:
-            return
-        try:
-            import json
-            await self._ws.send(json.dumps(payload))
-        except websockets.ConnectionClosed:
-            logger.warning("Map Engine connection closed — message dropped.")
-            self._ws = None
-        except Exception:
-            logger.exception("Failed to send message to Map Engine.")
+        """Enqueue a message for serialised delivery via the write pump.
+
+        If the queue is full (map engine unreachable for too long), the oldest
+        message is dropped to make room — stale telemetry is worthless anyway.
+        """
+        if self._send_queue.full():
+            try:
+                self._send_queue.get_nowait()
+                self._send_queue.task_done()
+                logger.warning("Send queue full — oldest message dropped.")
+            except asyncio.QueueEmpty:
+                pass
+        await self._send_queue.put(payload)
 
     async def send_init_connection(self, drone: Drone) -> None:
         # Store drone ref so the reconnect loop can re-announce without needing it passed in
