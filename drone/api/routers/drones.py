@@ -22,6 +22,7 @@ from drone.models.results import (
     ScanResult,
     StatusResult,
 )
+from drone.models.drone import Drone
 from drone.registry import get_drone
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ async def move(drone_id: str, body: MoveRequest) -> MoveResult:
     drone = _lookup(drone_id)
 
     # on_waypoint is called inside move_to after each single-cell step.
-    # Pushing position here (not at the end) gives Ken a stream of updates
+    # Pushing position here (not at the end) gives map engine a stream of updates
     # so the drone appears to move smoothly across the map in real-time.
     async def on_waypoint(d: Drone, step_dist: int) -> None:
         await map_client.send_position(d, step_dist)
@@ -59,7 +60,7 @@ async def scan(drone_id: str, body: ScanRequest = ScanRequest()) -> ScanResult:
     drone = _lookup(drone_id)
     result = await thermal_scan(drone, body.radius)
     # Notify Map Engine: each survivor signal found
-    for signal in result.survivors:
+    for signal in result.detections:
         await map_client.send_survivor_detected(drone, signal.x, signal.y, drone.z, signal.confidence)
     await map_client.send_drone_status(drone)
     return result

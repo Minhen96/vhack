@@ -32,7 +32,7 @@ async def lifespan(_app: FastAPI):
     await map_client.connect()
     await map_client.send_init_connection(drone)
 
-    # 4. Start listening for incoming messages from Ken (grid_snapshot, grid_update)
+    # 4. Start listening for incoming messages from map engine (grid_snapshot, grid_update)
     #    so the drone always has a fresh obstacle map for pathfinding.
     await map_client.start_listener()
 

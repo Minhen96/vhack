@@ -19,7 +19,7 @@ def _now_ms() -> int:
 
 
 class MapEngineClient:
-    """Persistent WebSocket connection to Ken's Map Engine.
+    """Persistent WebSocket connection to Map Engine.
 
     All messages share the same envelope:
         { "intention": "<type>", "drone_id": "...", "timestamp": <ms>, ...payload }
@@ -32,10 +32,10 @@ class MapEngineClient:
 
         # Local cache of blocked (impassable) grid cells.
         # Populated by grid_snapshot on connect, then patched by grid_update messages.
-        # Starts empty — all cells treated as passable until Ken sends data.
+        # Starts empty — all cells treated as passable until map engine sends data.
         self._blocked: set[tuple[int, int]] = set()
 
-        # Background asyncio task that reads incoming WS messages from Ken.
+        # Background asyncio task that reads incoming WS messages from map engine.
         self._listener_task: asyncio.Task | None = None
 
     async def connect(self) -> None:
@@ -49,11 +49,11 @@ class MapEngineClient:
             self._ws = None
 
     async def start_listener(self) -> None:
-        """Start a background task that reads incoming WS messages from Ken.
+        """Start a background task that reads incoming WS messages from map engine.
 
         Must be called after connect(). Safe to call when not connected (no-op).
 
-        Ken pushes two message types to the drone:
+        Map engine pushes two message types to the drone:
           grid_snapshot — full blocked-cell list on connect (or after a map reload).
                           Replaces _blocked entirely.
           grid_update   — single-cell passability change (new rubble discovered,
@@ -69,7 +69,7 @@ class MapEngineClient:
         logger.info("Map Engine listener started.")
 
     async def _receive_loop(self) -> None:
-        """Continuously read and dispatch incoming messages from Ken's Map Engine."""
+        """Continuously read and dispatch incoming messages from map engine."""
         import json
         while self._ws is not None:
             try:
@@ -79,7 +79,7 @@ class MapEngineClient:
 
                 if intention == "grid_snapshot":
                     # Full grid state — rebuild the blocked set from scratch.
-                    # Ken sends this right after the drone connects so pathfinding
+                    # Map engine sends this right after the drone connects so pathfinding
                     # has an accurate map before the first move command arrives.
                     self._blocked = {
                         (int(cell[0]), int(cell[1]))
@@ -112,7 +112,7 @@ class MapEngineClient:
         Updated in real-time by the WS listener. Pathfinding calls this before
         each movement step to get the freshest obstacle data with zero I/O cost.
 
-        Returns an empty set if Ken has not yet sent a grid_snapshot — drone
+        Returns an empty set if map engine has not yet sent a grid_snapshot — drone
         treats all cells as passable and falls back to straight-line movement.
         """
         return self._blocked

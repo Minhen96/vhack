@@ -12,6 +12,7 @@ from drone.constants import (
     BATTERY_DRAIN_DELIVER,
     BATTERY_DRAIN_PER_CELL,
     BATTERY_DRAIN_SCAN,
+    BATTERY_LOW_THRESHOLD,
     SCAN_RADIUS_DEFAULT,
 )
 from drone.models.drone import Drone, DroneStatus
@@ -29,6 +30,18 @@ from drone.models.results import (
 from drone.pathfinding import astar
 
 logger = logging.getLogger(__name__)
+
+# Maps internal DroneStatus → (MCP status string, current_task string | None)
+# MCP contract uses: idle | busy | returning | charging | offline
+# "busy" covers any active operation; current_task gives the detail.
+_MCP_STATUS: dict[DroneStatus, tuple[str, str | None]] = {
+    DroneStatus.IDLE:       ("idle",      None),
+    DroneStatus.MOVING:     ("busy",      "moving"),
+    DroneStatus.SCANNING:   ("busy",      "scanning"),
+    DroneStatus.DELIVERING: ("busy",      "delivering"),
+    DroneStatus.RETURNING:  ("returning", None),
+    DroneStatus.CHARGING:   ("charging",  None),
+}
 
 
 def _manhattan(x1: int, y1: int, x2: int, y2: int) -> int:
@@ -57,7 +70,7 @@ async def move_to(
       so the drone reacts to grid_update messages that arrive mid-path
       (new rubble, debris cleared, another drone entering a cell).
     - on_waypoint is awaited after each step so the router can push
-      a WS position event to Ken for smooth map animation.
+      a WS position event to map engine for smooth map animation.
 
     Returns:
       "arrived" — reached (x, y, z) successfully.
@@ -65,7 +78,13 @@ async def move_to(
     """
     if drone.battery_critical:
         logger.warning("move_to refused — battery critical (%.1f%%)", drone.battery)
-        return MoveResult(status="blocked", position=Position(**drone.position))
+        return MoveResult(
+            drone_id=drone.id,
+            success=False,
+            status="blocked",
+            new_position=Position(**drone.position),
+            battery_remaining_pct=drone.battery,
+        )
 
     # Import here to avoid a top-level circular import (map_client imports drone models)
     from drone.core.map_client import map_client
@@ -76,10 +95,16 @@ async def move_to(
     while (drone.x, drone.y) != goal:
         if drone.battery_critical:
             logger.warning("move_to aborted mid-path — battery critical (%.1f%%)", drone.battery)
-            return MoveResult(status="blocked", position=Position(**drone.position))
+            return MoveResult(
+                drone_id=drone.id,
+                success=False,
+                status="blocked",
+                new_position=Position(**drone.position),
+                battery_remaining_pct=drone.battery,
+            )
 
         # Re-plan every step using the latest WS-cached obstacle data.
-        # Since Ken pushes grid_update messages in real-time, _blocked reflects
+        # Since map pushes grid_update messages in real-time, _blocked reflects
         # any map changes that happened while the drone was walking earlier steps.
         path = astar((drone.x, drone.y), goal, map_client.get_blocked())
 
@@ -89,7 +114,13 @@ async def move_to(
                 "move_to: no path from (%d,%d) to (%d,%d) — blocked",
                 drone.x, drone.y, x, y,
             )
-            return MoveResult(status="blocked", position=Position(**drone.position))
+            return MoveResult(
+                drone_id=drone.id,
+                success=False,
+                status="blocked",
+                new_position=Position(**drone.position),
+                battery_remaining_pct=drone.battery,
+            )
 
         # Take only the immediate next step, then re-plan (rolling-horizon approach).
         # This is what makes the drone fully reactive: it never commits to a full
@@ -107,7 +138,7 @@ async def move_to(
         drone.status = DroneStatus.MOVING
         steps += 1
 
-        # Push per-step position update so Ken's map shows the drone moving
+        # Push per-step position update so map shows the drone moving
         # cell-by-cell. step_dist drives eta_ms for smooth animation lerp.
         if on_waypoint:
             await on_waypoint(drone, step_dist)
@@ -117,22 +148,38 @@ async def move_to(
         "move_to: %s arrived at (%d, %d, %d) in %d step(s), battery=%.1f%%",
         drone.id, x, y, z, steps, drone.battery,
     )
-    return MoveResult(status="arrived", position=Position(x=x, y=y, z=z))
+    return MoveResult(
+        drone_id=drone.id,
+        success=True,
+        status="arrived",
+        new_position=Position(x=x, y=y, z=z),
+        battery_remaining_pct=drone.battery,
+    )
 
 
 async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanResult:
+    scan_pos = Position(x=drone.x, y=drone.y, z=drone.z)
+
     if not drone.has_capability("thermal_scan"):
         logger.warning("thermal_scan refused — drone %s (type=%s) lacks capability", drone.id, drone.type)
         return ScanResult(
-            survivors=[],
+            drone_id=drone.id,
+            scan_position=scan_pos,
+            survivors_detected=False,
+            detections=[],
             scan_area=ScanArea(cx=drone.x, cy=drone.y, r=radius),
+            battery_remaining_pct=drone.battery,
         )
 
     if drone.battery_critical:
         logger.warning("thermal_scan refused — battery critical (%.1f%%)", drone.battery)
         return ScanResult(
-            survivors=[],
+            drone_id=drone.id,
+            scan_position=scan_pos,
+            survivors_detected=False,
+            detections=[],
             scan_area=ScanArea(cx=drone.x, cy=drone.y, r=radius),
+            battery_remaining_pct=drone.battery,
         )
 
     drone.status = DroneStatus.SCANNING
@@ -141,34 +188,52 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
     # TODO: replace with real grid data from Map Engine once the
     # GET /grid/passability (or equivalent) endpoint is available.
     # For now, simulate a 10% chance of a survivor signal per cell in radius.
-    survivors: list[SurvivorSignal] = []
+    detections: list[SurvivorSignal] = []
     for dy in range(-radius, radius + 1):
         for dx in range(-radius, radius + 1):
             nx, ny = drone.x + dx, drone.y + dy
             if random.random() < 0.1:
                 confidence = round(random.uniform(0.7, 1.0), 3)
-                survivors.append(SurvivorSignal(x=nx, y=ny, confidence=confidence))
+                detections.append(SurvivorSignal(x=nx, y=ny, confidence=confidence))
 
     drone.status = DroneStatus.IDLE
 
     logger.info(
         "thermal_scan: %s scanned r=%d from (%d, %d), found %d signal(s)",
-        drone.id, radius, drone.x, drone.y, len(survivors),
+        drone.id, radius, drone.x, drone.y, len(detections),
     )
     return ScanResult(
-        survivors=survivors,
+        drone_id=drone.id,
+        scan_position=scan_pos,
+        survivors_detected=len(detections) > 0,
+        detections=detections,
         scan_area=ScanArea(cx=drone.x, cy=drone.y, r=radius),
+        battery_remaining_pct=drone.battery,
     )
 
 
 async def deliver_aid(drone: Drone, x: int, y: int, z: int = 0) -> DeliverResult:
     if not drone.has_capability("deliver_aid"):
         logger.warning("deliver_aid refused — drone %s (type=%s) lacks capability", drone.id, drone.type)
-        return DeliverResult(status="failed", location=Position(**drone.position))
+        return DeliverResult(
+            drone_id=drone.id,
+            success=False,
+            status="failed",
+            delivered_to=Position(**drone.position),
+            battery_remaining_pct=drone.battery,
+            message=f"Drone type '{drone.type.value}' does not support aid delivery.",
+        )
 
     if drone.battery_critical:
         logger.warning("deliver_aid refused — battery critical (%.1f%%)", drone.battery)
-        return DeliverResult(status="failed", location=Position(**drone.position))
+        return DeliverResult(
+            drone_id=drone.id,
+            success=False,
+            status="failed",
+            delivered_to=Position(**drone.position),
+            battery_remaining_pct=drone.battery,
+            message="Battery critical — cannot deliver aid.",
+        )
 
     drone.status = DroneStatus.DELIVERING
 
@@ -182,21 +247,32 @@ async def deliver_aid(drone: Drone, x: int, y: int, z: int = 0) -> DeliverResult
     drone.status = DroneStatus.IDLE
 
     logger.info("deliver_aid: %s delivered at (%d, %d, %d), battery=%.1f%%", drone.id, x, y, z, drone.battery)
-    return DeliverResult(status="delivered", location=Position(x=x, y=y, z=z))
+    return DeliverResult(
+        drone_id=drone.id,
+        success=True,
+        status="delivered",
+        delivered_to=Position(x=x, y=y, z=z),
+        battery_remaining_pct=drone.battery,
+        message="Aid delivered successfully.",
+    )
 
 
 async def get_battery_status(drone: Drone) -> BatteryResult:
     return BatteryResult(
         drone_id=drone.id,
-        battery=drone.battery,
+        battery_pct=drone.battery,
         charging=drone.is_charging,
+        is_low=drone.battery_low,
+        low_threshold_pct=BATTERY_LOW_THRESHOLD,
     )
 
 
 async def get_drone_status(drone: Drone) -> StatusResult:
+    mcp_status, current_task = _MCP_STATUS.get(drone.status, ("idle", None))
     return StatusResult(
         drone_id=drone.id,
-        status=drone.status.value,
+        status=mcp_status,
+        current_task=current_task,
         position=Position(**drone.position),
         battery=drone.battery,
     )
@@ -204,7 +280,15 @@ async def get_drone_status(drone: Drone) -> StatusResult:
 
 async def return_to_base(drone: Drone) -> ReturnResult:
     if drone.status == DroneStatus.CHARGING:
-        return ReturnResult(status="arrived", eta_seconds=0)
+        return ReturnResult(
+            drone_id=drone.id,
+            success=True,
+            status="arrived",
+            position=Position(**drone.position),
+            battery_pct=drone.battery,
+            message="Already at base and charging.",
+            eta_seconds=0,
+        )
 
     distance = _manhattan(drone.x, drone.y, BASE_X, BASE_Y)
     _drain(drone, distance * BATTERY_DRAIN_PER_CELL)
@@ -214,4 +298,12 @@ async def return_to_base(drone: Drone) -> ReturnResult:
     drone.battery = 100.0
 
     logger.info("return_to_base: %s returned to base, fully charged", drone.id)
-    return ReturnResult(status="arrived", eta_seconds=distance)
+    return ReturnResult(
+        drone_id=drone.id,
+        success=True,
+        status="arrived",
+        position=Position(x=BASE_X, y=BASE_Y, z=BASE_Z),
+        battery_pct=drone.battery,
+        message="Drone returned to base and fully charged.",
+        eta_seconds=distance,
+    )

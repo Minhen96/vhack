@@ -18,32 +18,20 @@ class DroneStatus(str, Enum):
 class DroneType(str, Enum):
     SCANNER = "scanner"
     DELIVERY = "delivery"
-    HYBRID = "hybrid"
 
 
+# Available on every drone regardless of type
+COMMON_CAPABILITIES: list[str] = [
+    "move_to",
+    "return_to_base",
+    "get_battery_status",
+    "get_drone_status",
+]
+
+# Type-specific capabilities — what makes each type unique
 CAPABILITIES: dict[DroneType, list[str]] = {
-    DroneType.SCANNER: [
-        "thermal_scan",
-        "move_to",
-        "return_to_base",
-        "get_battery_status",
-        "get_drone_status",
-    ],
-    DroneType.DELIVERY: [
-        "deliver_aid",
-        "move_to",
-        "return_to_base",
-        "get_battery_status",
-        "get_drone_status",
-    ],
-    DroneType.HYBRID: [
-        "thermal_scan",
-        "deliver_aid",
-        "move_to",
-        "return_to_base",
-        "get_battery_status",
-        "get_drone_status",
-    ],
+    DroneType.SCANNER:  ["thermal_scan"],
+    DroneType.DELIVERY: ["deliver_aid"],
 }
 
 
@@ -65,7 +53,7 @@ class Drone:
     #              updated automatically on every move_to call
     # elevation:   vertical camera tilt in degrees (-90 = straight down, 0 = horizon)
     #              drones point their camera downward by default
-    # scan_radius: how many grid cells the drone can sense — used by Ken to draw FOV cone
+    # scan_radius: how many grid cells the drone can sense — used by map engine to draw FOV cone
     # fov:         camera lens angle in degrees — configurable via DRONE_FOV in constants.py
     azimuth: float = 0.0
     elevation: float = -90.0
@@ -75,7 +63,8 @@ class Drone:
     capabilities: list[str] = field(init=False)
 
     def __post_init__(self) -> None:
-        self.capabilities = CAPABILITIES[self.type]
+        # Full capability list = type-specific + common (sent to MCP and Map Engine on startup)
+        self.capabilities = CAPABILITIES[self.type] + COMMON_CAPABILITIES
 
     @property
     def position(self) -> dict[str, int]:
@@ -83,7 +72,7 @@ class Drone:
 
     @property
     def spherical(self) -> dict[str, float]:
-        """Camera orientation + FOV for Ken's 3D map renderer."""
+        """Camera orientation + FOV for map engine."""
         return {
             "azimuth": self.azimuth,
             "elevation": self.elevation,
@@ -111,6 +100,5 @@ class Drone:
         Capability is determined by drone type via the CAPABILITIES map.
         A scanner can thermal_scan but not deliver_aid.
         A delivery drone can deliver_aid but not thermal_scan.
-        A hybrid can do both.
         """
         return name in self.capabilities
