@@ -39,10 +39,17 @@ def _lookup(drone_id: str):
 @router.post("/{drone_id}/move", response_model=MoveResult)
 async def move(drone_id: str, body: MoveRequest) -> MoveResult:
     drone = _lookup(drone_id)
-    distance = abs(body.x - drone.x) + abs(body.y - drone.y)
-    result = await move_to(drone, body.x, body.y, body.z)
-    # Notify Map Engine: drone moved to new position and is now idle
-    await map_client.send_position(drone, distance)
+
+    # on_waypoint is called inside move_to after each single-cell step.
+    # Pushing position here (not at the end) gives Ken a stream of updates
+    # so the drone appears to move smoothly across the map in real-time.
+    async def on_waypoint(d: Drone, step_dist: int) -> None:
+        await map_client.send_position(d, step_dist)
+        await map_client.send_drone_status(d)
+
+    result = await move_to(drone, body.x, body.y, body.z, on_waypoint=on_waypoint)
+    # Final status push — sets drone to IDLE (or confirms blocked position).
+    # Position was already sent at each waypoint above.
     await map_client.send_drone_status(drone)
     return result
 
@@ -61,12 +68,11 @@ async def scan(drone_id: str, body: ScanRequest = ScanRequest()) -> ScanResult:
 @router.post("/{drone_id}/deliver", response_model=DeliverResult)
 async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
     drone = _lookup(drone_id)
-    distance = abs(body.x - drone.x) + abs(body.y - drone.y)
     result = await deliver_aid(drone, body.x, body.y, body.z)
     # Notify Map Engine: aid delivered at location + drone position updated
     if result.status == "delivered":
         await map_client.send_aid_delivered(drone, body.x, body.y, body.z)
-    await map_client.send_position(drone, distance)
+    await map_client.send_position(drone)
     await map_client.send_drone_status(drone)
     return result
 
