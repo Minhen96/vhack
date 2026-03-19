@@ -84,6 +84,11 @@ func runServer() {
 	log.Printf("🎯 Generating %d survivors for the disaster simulation...", survivorCount)
 	Survivors = GenerateSurvivors(survivorCount)
 
+	// Generate buildings (5-8 uncorrupted buildings as obstacles)
+	buildingCount := 5 + rand.Intn(4) // 5 to 8
+	log.Printf("🏢 Generating %d buildings...", buildingCount)
+	Buildings = GenerateBuildings(buildingCount)
+
 	// Create a new Hub instance
 	hub := NewHub()
 

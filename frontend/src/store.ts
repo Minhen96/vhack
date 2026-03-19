@@ -48,6 +48,17 @@ export interface BlockedArea {
   radius: number;
 }
 
+/** Building obstacle from server */
+export interface Building {
+  id: string;
+  x: number;
+  y: number;     // ground plane Z (maps to Three.js Z)
+  width: number;
+  height: number;
+  depth: number;
+  thermal: number;
+}
+
 /** Grid snapshot containing all blocked areas */
 export interface GridSnapshot {
   timestamp: number;
@@ -90,20 +101,23 @@ interface DroneStore {
   // Connection state
   connectionStatus: ConnectionStatus;
   wsUrl: string;
-  
+
   // Drones state - Map of drone_id to DroneState for multi-drone support
   drones: Record<string, DroneState>;
-  
+
   // Survivors/thermal signatures
   survivors: Survivor[];
-  
+
   // Environment obstacles (rubble blocks)
   blockedAreas: BlockedArea[];
   gridTimestamp: number;
-  
+
+  // Buildings
+  buildings: Building[];
+
   // Hover state for UI interaction
   hoveredDroneId: string | null;
-  
+
   // Actions
   setConnectionStatus: (status: ConnectionStatus) => void;
   setDrone: (drone: DroneState) => void;
@@ -113,6 +127,7 @@ interface DroneStore {
   addSurvivor: (survivor: Survivor) => void;
   updateSurvivor: (id: string, updates: Partial<Survivor>) => void;
   setBlockedAreas: (blocked: BlockedArea[], timestamp: number) => void;
+  setBuildings: (buildings: Building[]) => void;
   setHoveredDroneId: (droneId: string | null) => void;
   setWsUrl: (url: string) => void;
   reset: () => void;
@@ -522,21 +537,18 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
           confidence: number;
           status: string;
         }>;
+        buildings?: Building[];
       };
-      
-      console.log('[WebSocket] init_connection received!');
-      console.log('[WebSocket] init_connection raw message:', JSON.stringify(message));
-      console.log('[WebSocket] init_connection received, survivors:', initData.survivors?.length || 0);
-      console.log('[WebSocket] init_connection survivors data:', JSON.stringify(initData.survivors));
-      
-      // Process survivors from init_connection
+
+      // Process survivors — server: {x, y=altitude(0), z=ground_z}
+      // Three.js: x=x, y=ground_height(0.3), z=ground_z
       if (initData.survivors && initData.survivors.length > 0) {
         const survivors: Survivor[] = initData.survivors.map((s) => ({
           id: s.id,
           position: {
             x: s.x,
-            y: s.z, // Backend Z (altitude) maps to Three.js Y
-            z: s.y, // Backend Y maps to Three.js Z (ground plane)
+            y: 0.3,  // fixed ground level with small offset so model sits on ground
+            z: s.z,  // ground plane Z coordinate
           },
           confidence: s.confidence,
           status: (s.status as SurvivorStatus) || 'DETECTED',
@@ -544,9 +556,12 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
           timestamp: initData.timestamp,
           detected_by: 'server',
         }));
-        
-        console.log('[WebSocket] Setting survivors from init_connection:', survivors.length);
         useStore.getState().setSurvivors(survivors);
+      }
+
+      // Process buildings
+      if (initData.buildings && initData.buildings.length > 0) {
+        useStore.getState().setBuildings(initData.buildings);
       }
       break;
     }
@@ -567,6 +582,7 @@ const initialState = {
   survivors: [] as Survivor[],
   blockedAreas: [] as BlockedArea[],
   gridTimestamp: 0,
+  buildings: [] as Building[],
   hoveredDroneId: null,
 };
 
@@ -608,7 +624,9 @@ export const useStore = create<DroneStore>((set) => ({
   
   setBlockedAreas: (blocked, timestamp) =>
     set({ blockedAreas: blocked, gridTimestamp: timestamp }),
-  
+
+  setBuildings: (buildings) => set({ buildings }),
+
   setHoveredDroneId: (droneId) => set({ hoveredDroneId: droneId }),
   
   setWsUrl: (url) => set({ wsUrl: url }),

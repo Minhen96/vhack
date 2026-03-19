@@ -133,6 +133,75 @@ func GetSurvivors() []Survivor {
 }
 
 // =============================================================================
+// Building State - Server-managed building positions
+// =============================================================================
+
+// Building represents an uncorrupted building obstacle in the disaster area
+type Building struct {
+	ID      string  `json:"id"`
+	X       float64 `json:"x"`       // Grid X (maps to Three.js X)
+	Y       float64 `json:"y"`       // Grid Z/ground plane (maps to Three.js Z)
+	Width   float64 `json:"width"`   // X dimension
+	Height  float64 `json:"height"`  // Vertical dimension (Three.js Y)
+	Depth   float64 `json:"depth"`   // Z dimension
+	Thermal float64 `json:"thermal"` // Surface temperature °C (14–18)
+}
+
+// Global Buildings - randomly generated on server startup
+var (
+	Buildings      []Building
+	BuildingsMutex sync.RWMutex
+)
+
+// GenerateBuildings creates buildings scattered across the map, avoiding the command base
+func GenerateBuildings(count int) []Building {
+	buildings := make([]Building, count)
+	for i := 0; i < count; i++ {
+		w := float64(4 + rand.Intn(6)) // width  4–9
+		h := float64(3 + rand.Intn(8)) // height 3–10
+		d := float64(4 + rand.Intn(6)) // depth  4–9
+		var bx, by float64
+		for {
+			bx = float64(rand.Intn(60) - 30) // -30 to 30
+			by = float64(rand.Intn(60) - 30) // -30 to 30
+			if math.Sqrt(bx*bx+by*by) > 12 {
+				break
+			}
+		}
+		buildings[i] = Building{
+			ID:      fmt.Sprintf("building_%d", i+1),
+			X:       bx,
+			Y:       by,
+			Width:   w,
+			Height:  h,
+			Depth:   d,
+			Thermal: 14 + rand.Float64()*4,
+		}
+		log.Printf("🏢 Generated building %d at (%.1f, %.1f) size %.0fx%.0fx%.0f", i+1, bx, by, w, h, d)
+	}
+	return buildings
+}
+
+// GetBuildingBlockedCells expands each building footprint into individual grid cells
+// for the drone's A* pathfinding to treat as impassable
+func GetBuildingBlockedCells() []BlockedArea {
+	var cells []BlockedArea
+	BuildingsMutex.RLock()
+	defer BuildingsMutex.RUnlock()
+	for _, b := range Buildings {
+		halfW := b.Width / 2
+		halfD := b.Depth / 2
+		for ix := int(b.X - halfW); ix <= int(b.X+halfW); ix++ {
+			for iy := int(b.Y - halfD); iy <= int(b.Y+halfD); iy++ {
+				cells = append(cells, BlockedArea{X: float64(ix), Y: float64(iy), Radius: 0})
+			}
+		}
+	}
+	return cells
+}
+
+
+// =============================================================================
 // Client Struct - Queue-based architecture
 // =============================================================================
 
@@ -781,6 +850,9 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 	// Send initial connection response with grid snapshot and Command Base coordinates
 	// Note: The frontend maps: backend Y -> Three.js Z (ground), backend Z -> Three.js Y (altitude)
 	// Command Base is at Three.js [0, 0.1, 40], so backend should send Y=40 (ground), Z=10 (altitude)
+	// Merge building footprint cells with rubble blocked areas
+	allBlocked := GetBuildingBlockedCells()
+
 	initialResponse := InitConnectionResponse{
 		Type:      MessageTypeInitConnection,
 		DroneID:   droneID,
@@ -788,32 +860,47 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 		GridSnapshot: GridSnapshot{
 			Type:      MessageTypeGridSnapshot,
 			Timestamp: time.Now().UnixMilli(),
-			Blocked: []BlockedArea{
-				{X: 10, Y: 10, Radius: 5},
-				{X: 25, Y: 30, Radius: 8},
-				{X: 50, Y: 20, Radius: 6},
-			},
+			Blocked:   allBlocked,
 			CommandBase: &CommandBase{
 				X: BaseX,
-				Y: 40.0, // Updated to match frontend CommandBase at Three.js Z=40
+				Y: 40.0,
 			},
 		},
 		Position: Position{
 			X: BaseX,
-			Y: 40.0, // Ground position (maps to Three.js Z=40 = Command Base)
-			Z: 10.0, // Altitude (maps to Three.js Y=10 = hovering altitude)
+			Y: 40.0,
+			Z: 10.0,
 		},
 		Survivors: GetSurvivors(),
+		Buildings: Buildings,
 	}
 
 	responseJSON, err := json.Marshal(initialResponse)
 	if err == nil {
 		select {
 		case client.Send <- responseJSON:
-			log.Printf("📤 Sent init_connection response to %s with Command Base at (%.2f, %.2f) and %d survivors",
-				client.getClientIdentifier(), BaseX, BaseY, len(GetSurvivors()))
+			log.Printf("📤 Sent init_connection to %s: %d survivors, %d buildings",
+				client.getClientIdentifier(), len(GetSurvivors()), len(Buildings))
 		default:
 			log.Printf("Failed to send initial connection to client")
+		}
+	}
+
+	// Drone clients use "intention" field (MH's map_client convention).
+	// Send a separate grid_snapshot so A* pathfinding gets building blocked cells.
+	if clientType == DroneClient {
+		droneGrid := map[string]interface{}{
+			"intention": "grid_snapshot",
+			"timestamp": time.Now().UnixMilli(),
+			"blocked":   allBlocked,
+		}
+		if droneGridJSON, err2 := json.Marshal(droneGrid); err2 == nil {
+			select {
+			case client.Send <- droneGridJSON:
+				log.Printf("📤 Sent grid_snapshot (intention) to drone %s: %d blocked cell(s)", droneID, len(allBlocked))
+			default:
+				log.Printf("Failed to send grid_snapshot to drone %s", droneID)
+			}
 		}
 	}
 }
@@ -835,4 +922,5 @@ type InitConnectionResponse struct {
 	GridSnapshot GridSnapshot `json:"grid_snapshot"`
 	Position     Position    `json:"position,omitempty"`
 	Survivors    []Survivor  `json:"survivors,omitempty"`
+	Buildings    []Building  `json:"buildings,omitempty"`
 }

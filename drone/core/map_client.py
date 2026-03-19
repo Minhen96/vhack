@@ -138,7 +138,7 @@ class MapEngineClient:
                     # Map engine sends this right after the drone connects so pathfinding
                     # has an accurate map before the first move command arrives.
                     self._blocked = {
-                        (int(cell[0]), int(cell[1]))
+                        (int(cell["x"]), int(cell["y"]))
                         for cell in msg.get("blocked", [])
                     }
                     logger.info("grid_snapshot: %d blocked cell(s) loaded", len(self._blocked))

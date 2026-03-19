@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { Drone, Drones } from './Drone';
 import { Rubble } from './Rubble';
 import { Survivors } from './Survivors';
+import { Buildings } from './Buildings';
 import { CommandBase } from './CommandBase';
 
 // Seeded random number generator for deterministic random values
@@ -258,6 +259,8 @@ export function Scene() {
       {/* Drones - Renders all drones from store */}
       <Drones />
       <Rubble />
+      {/* Buildings - server-generated box obstacles */}
+      <Buildings />
       {/* Survivors - Async GLTF models loaded with Suspense */}
       <Suspense fallback={null}>
         <Survivors />
