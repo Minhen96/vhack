@@ -36,7 +36,7 @@ class ScanResult(BaseModel):
     scan_position: Position                # where the drone was when it scanned
     survivors_detected: bool               # True if at least one signal found
     detections: list[SurvivorSignal]       # signals above 30°C (likely survivors)
-    raw_readings: list[dict]               # all thermal readings unfiltered — for heatmap rendering
+    raw_readings: list[dict] = []          # all thermal readings unfiltered — for heatmap rendering
     scan_area: ScanArea
     battery_remaining_pct: float
 

@@ -144,7 +144,7 @@ async def move_to(drone_id: str, x: int, y: int, z: int) -> dict:
         resp = await client.post(
             f"{url}/drones/{drone_id}/move",
             json={"x": x, "y": y, "z": z},
-            timeout=10.0,
+            timeout=120.0,
         )
     return resp.json()
 
@@ -171,7 +171,7 @@ async def thermal_scan(drone_id: str, radius: int = 8) -> dict:
         resp = await client.post(
             f"{url}/drones/{drone_id}/scan",
             json={"radius": radius},
-            timeout=10.0,
+            timeout=60.0,
         )
     return resp.json()
 

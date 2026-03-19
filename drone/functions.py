@@ -326,7 +326,7 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
                 all_temps[key] = max(all_temps.get(key, 0.0), r.get("temp_celsius", 0.0))
         except Exception:
             logger.exception("thermal_scan: step %d scan failed", i)
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.1)
 
     drone.azimuth = original_azimuth
     await map_client.send_position(drone, 0)  # restore facing direction in UI

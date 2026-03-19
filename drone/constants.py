@@ -8,4 +8,4 @@ SCAN_RADIUS_DEFAULT: int = 8
 DRONE_FOV: float = 60.0             # camera field of view in degrees
 BASE_X: int = 0
 BASE_Y: int = 0
-BASE_Z: int = 0
+BASE_Z: int = 10  # drone hovers at altitude 10 when idle at base

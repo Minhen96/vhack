@@ -251,7 +251,9 @@ class MapEngineClient:
             "x": drone.x,
             "y": drone.y,
             "z": drone.z,
-            "spherical": drone.spherical,  # {"azimuth": ..., "elevation": ...}
+            "spherical": drone.spherical,
+            "status": drone.status.value.upper(),
+            "battery": drone.battery,
             "eta_ms": distance * 200,  # expected animation duration (200ms per cell)
         })
 

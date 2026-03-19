@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -36,13 +37,25 @@ async def lifespan(_app: FastAPI):
     #    so the drone always has a fresh obstacle map for pathfinding.
     await map_client.start_listener()
 
+    # 5. Broadcast initial position so the UI shows the drone immediately (IDLE at base)
+    await map_client.send_position(drone)
+
+    # 6. Periodic heartbeat — re-sends current position every 8s so the UI
+    #    always has up-to-date state even after page refreshes or reconnects.
+    async def _position_heartbeat() -> None:
+        while True:
+            await asyncio.sleep(8.0)
+            await map_client.send_position(drone)
+
+    heartbeat_task = asyncio.create_task(_position_heartbeat())
+
     logger.info("Drone server ready — %s:%d", DRONE_HOST, DRONE_PORT)
 
     yield
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
 
-    # when the app stops, run this part
+    heartbeat_task.cancel()
     await deregister_from_mcp()
     await map_client.close()
 

@@ -300,6 +300,9 @@ type Hub struct {
 	DroneClients map[*Client]bool
 	// UIClients map for stats and iteration (read-only, updated via channels)
 	UIClients map[*Client]bool
+
+	// Last known send_position message per drone — replayed to new UI clients on connect
+	lastPositionMsg map[string][]byte
 }
 
 // =============================================================================
@@ -309,13 +312,14 @@ type Hub struct {
 // NewHub creates and returns a new Hub instance with channel-based architecture
 func NewHub() *Hub {
 	return &Hub{
-		Register:       make(chan *Client),
-		Unregister:     make(chan *Client),
-		Broadcast:      make(chan []byte, HubChannelBufferSize),
-		DroneMessages:  make(chan []byte, HubChannelBufferSize),
-		UIMessages:     make(chan []byte, HubChannelBufferSize),
-		DroneClients:   make(map[*Client]bool),
-		UIClients:      make(map[*Client]bool),
+		Register:        make(chan *Client),
+		Unregister:      make(chan *Client),
+		Broadcast:       make(chan []byte, HubChannelBufferSize),
+		DroneMessages:   make(chan []byte, HubChannelBufferSize),
+		UIMessages:      make(chan []byte, HubChannelBufferSize),
+		DroneClients:    make(map[*Client]bool),
+		UIClients:       make(map[*Client]bool),
+		lastPositionMsg: make(map[string][]byte),
 	}
 }
 
@@ -373,8 +377,21 @@ func (h *Hub) registerClient(client *Client) {
 	case UIClient:
 		h.mu.Lock()
 		h.UIClients[client] = true
+		// Snapshot cached positions while holding the lock
+		cachedPositions := make([][]byte, 0, len(h.lastPositionMsg))
+		for _, msg := range h.lastPositionMsg {
+			cachedPositions = append(cachedPositions, msg)
+		}
 		h.mu.Unlock()
 		log.Printf("🖥️  UI client registered (Total UI: %d)", h.getUICount())
+
+		// Replay last known drone positions so the UI sees drones immediately
+		for _, msg := range cachedPositions {
+			select {
+			case client.Send <- msg:
+			default:
+			}
+		}
 
 		// Start listener for UI's receive channel
 		go h.uiMessageListener(client)
@@ -512,6 +529,8 @@ func (h *Hub) handleDroneMessage(message []byte) {
 	case MessageTypeSendPosition:
 		// Parse position data and update DroneState map
 		h.handleSendPosition(message)
+		// Cache for replay to future UI clients
+		h.cacheDronePosition(message)
 		// Broadcast to UI clients
 		h.broadcastToUIClients(message)
 
@@ -560,6 +579,20 @@ func (h *Hub) handleSendPosition(message []byte) {
 	}
 
 	log.Printf("📍 Drone %s position updated: (%.2f, %.2f, %.2f)", posMsg.DroneID, posMsg.X, posMsg.Y, posMsg.Z)
+}
+
+// cacheDronePosition stores the latest send_position message per drone ID
+// so new UI clients get current drone state on connect
+func (h *Hub) cacheDronePosition(message []byte) {
+	var msg struct {
+		DroneID string `json:"drone_id"`
+	}
+	if err := json.Unmarshal(message, &msg); err != nil || msg.DroneID == "" {
+		return
+	}
+	h.mu.Lock()
+	h.lastPositionMsg[msg.DroneID] = message
+	h.mu.Unlock()
 }
 
 // handleSurvivorDetected logs and processes survivor detection events

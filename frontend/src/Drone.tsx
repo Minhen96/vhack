@@ -229,23 +229,21 @@ export function Drone({ droneId }: DroneProps) {
       spot.intensity = THREE.MathUtils.mapLinear(altitude, 5, 30, 80, 30);
     }
     
-    // 8. Update sensor disc visualization
+    // 8. Update sensor cone visualization (3D frustum: tip at drone, base at ground)
     if (coneRef.current) {
-      const newRadius = spherical.scan_radius;
+      const altitude = Math.max(group.position.y, 0.5);
+      const radius = spherical.scan_radius;
 
-      // Only recreate geometry when scan_radius changes
-      if (spherical.scan_radius !== prevScanRadius.current) {
-        prevScanRadius.current = spherical.scan_radius;
-        const discGeo = coneRef.current.geometry as THREE.CircleGeometry;
-        discGeo.dispose();
-        coneRef.current.geometry = new THREE.CircleGeometry(newRadius, 48);
-      }
+      // Center the cone between drone (y=0 local) and ground (y=-altitude local)
+      coneRef.current.position.y = -altitude / 2;
+      // Scale: x/z set radius, y sets height to reach the ground
+      coneRef.current.scale.set(radius, altitude, radius);
 
-      // Pulse cone opacity: active scan = rhythmic glow, idle = faint
+      // Pulse opacity: active scan = rhythmic glow, idle = faint
       const isScanning = droneStatus.current === 'SCANNING';
       const targetOpacity = isScanning
-        ? 0.06 + Math.abs(Math.sin(time * 2.5)) * 0.12  // pulse 0.06–0.18
-        : 0.03;
+        ? 0.05 + Math.abs(Math.sin(time * 2.5)) * 0.09  // pulse 0.05–0.14
+        : 0.02;
       const coneMat = coneRef.current.material as THREE.MeshBasicMaterial;
       coneMat.opacity = THREE.MathUtils.lerp(coneMat.opacity, targetOpacity, 0.05);
     }
@@ -322,10 +320,6 @@ export function Drone({ droneId }: DroneProps) {
       lastDetectionTime.current = now;
     }
   });
-
-  const spherical = currentSpherical.current;
-  const coneRadius = spherical.scan_radius;
-  const altitude = currentPos.current.y;
 
   return (
     <group ref={groupRef} position={[0, 10, 0]}>
@@ -470,13 +464,9 @@ export function Drone({ droneId }: DroneProps) {
             SENSOR FOV VISUALIZATION
         ========================================================================= */}
         
-        {/* Flat scan disc — shows coverage area on the ground */}
-        <mesh
-          ref={coneRef}
-          position={[0, -0.5, 0]}
-          rotation={[Math.PI / 2, 0, 0]}
-        >
-          <circleGeometry args={[coneRadius, 48]} />
+        {/* 3D FOV cone — tip at drone, base fans out to ground */}
+        <mesh ref={coneRef}>
+          <coneGeometry args={[1, 1, 48, 1, true]} />
           <primitive object={materials.sensorCone} />
         </mesh>
         

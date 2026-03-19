@@ -233,6 +233,10 @@ export function connectWebSocket(url?: string): void {
   const wsUrl = url || import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws/ui';
 
   if (ws) {
+    ws.onclose = null;
+    ws.onerror = null;
+    ws.onmessage = null;
+    ws.onopen = null;
     ws.close();
     ws = null;
   }
@@ -299,6 +303,11 @@ export function disconnectWebSocket(): void {
   }
 
   if (ws) {
+    // Null out handlers first so onclose doesn't schedule a reconnect
+    ws.onclose = null;
+    ws.onerror = null;
+    ws.onmessage = null;
+    ws.onopen = null;
     ws.close();
     ws = null;
   }

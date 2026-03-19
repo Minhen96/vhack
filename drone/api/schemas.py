@@ -10,7 +10,7 @@ class MoveRequest(BaseModel):
 
 
 class ScanRequest(BaseModel):
-    radius: int = Field(default=SCAN_RADIUS_DEFAULT, ge=1, le=10)
+    radius: int = Field(default=SCAN_RADIUS_DEFAULT, ge=1, le=50)
 
 
 class DeliverRequest(BaseModel):
