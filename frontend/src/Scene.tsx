@@ -1,7 +1,6 @@
 import { useRef, useMemo, Suspense } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import {
-  OrbitControls,
   Environment,
   Loader,
 } from '@react-three/drei';
@@ -22,6 +21,8 @@ import { Survivors } from './Survivors';
 import { Buildings } from './Buildings';
 import { CommandBase } from './CommandBase';
 import { ThermalHeatmap } from './ThermalHeatmap';
+import { CameraController } from './CameraController';
+import { useViewStore } from './viewStore';
 
 // Seeded random number generator for deterministic random values
 function seededRandom(seed: number): () => number {
@@ -155,19 +156,25 @@ function Ground() {
   }, []);
 
   return (
-    <mesh
-      rotation={[-Math.PI / 2, 0, 0]}
-      position={[0, -0.5, 0]}
-      receiveShadow
-    >
-      <planeGeometry args={[200, 200]} />
-      <meshStandardMaterial
-        map={groundTexture}
-        color="#3d322a"
-        roughness={0.92}
-        metalness={0.05}
-      />
-    </mesh>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -0.5, 0]}
+        receiveShadow
+        onDoubleClick={(e) => {
+          if (useViewStore.getState().viewMode === 'GLOBAL') {
+            const { x, z } = e.point;
+            console.log(`📍 Ground Clicked: X=${x.toFixed(2)}, Z=${z.toFixed(2)}`);
+          }
+        }}
+      >
+        <planeGeometry args={[200, 200]} />
+        <meshStandardMaterial
+          map={groundTexture}
+          color="#3d322a"
+          roughness={0.92}
+          metalness={0.05}
+        />
+      </mesh>
   );
 }
 
@@ -272,15 +279,7 @@ export function Scene() {
       <CommandBase />
 
       {/* Camera Controls */}
-      <OrbitControls
-        enablePan={true}
-        enableZoom={true}
-        enableRotate={true}
-        minDistance={5}
-        maxDistance={100}
-        maxPolarAngle={Math.PI / 2 - 0.1}
-        target={[0, 0, 0]}
-      />
+      <CameraController />
 
       {/* Post-Processing Effects - Cinematic sunset look */}
       <EffectComposer enableNormalPass>

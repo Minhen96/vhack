@@ -3,6 +3,8 @@ import { Scene } from './Scene';
 import { Overlay } from './Overlay';
 import { MissionLog } from './MissionLog';
 import { connectWebSocket, disconnectWebSocket, useStore } from './store';
+import { HUDOverlay } from './HUDOverlay';
+import { KeyboardManager } from './KeyboardManager';
 import './App.css';
 
 export default function App() {
@@ -37,8 +39,13 @@ export default function App() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#0a0a0f', position: 'relative' }}>
+      <KeyboardManager />
+      
       {/* Global Drone Status Overlay */}
       <Overlay />
+      
+      {/* HUD for Drone Views */}
+      <HUDOverlay />
 
       {/* HUD Overlay */}
       <div className="hud-container">
@@ -69,6 +76,21 @@ export default function App() {
 
         {/* Scan line effect */}
         <div className="scan-lines" />
+        
+        {/* Help Icon */}
+        <div 
+          style={{ 
+            position: 'absolute', 
+            bottom: '10px', 
+            right: '10px', 
+            cursor: 'help', 
+            color: 'rgba(0, 255, 255, 0.5)',
+            fontSize: '12px'
+          }}
+          title="Shortcuts: G=Global, F=Follow, P=Pilot, Esc=Back, 1-9=Switch Drone"
+        >
+          ⓘ Controls
+        </div>
       </div>
 
       <Scene />

@@ -122,7 +122,7 @@ if [ "$RUN" = true ]; then
     echo "- Backend:    http://localhost:8000/docs"
     echo "- Drone 1:    http://localhost:8001/docs"
     echo "- Drone 2:    http://localhost:8002/docs"
-    echo "- Frontend:   http://localhost:5173"
+    echo "- Frontend:   http://localhost:3000"
     
     # Wait for all background processes
     wait

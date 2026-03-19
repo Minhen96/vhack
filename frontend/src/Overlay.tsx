@@ -1,5 +1,5 @@
-import { useStore } from './store';
-import type { DroneStatus } from './store';
+import { useStore, type DroneStatus } from './store';
+import { useViewStore } from './viewStore';
 import { useState } from 'react';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
@@ -158,6 +158,21 @@ const toggleButtonStyle: React.CSSProperties = {
   transition: 'all 0.2s ease',
 };
 
+const viewButtonStyle = (isActive: boolean): React.CSSProperties => ({
+  background: isActive ? 'rgba(0, 255, 255, 0.25)' : 'rgba(0, 255, 255, 0.05)',
+  border: `1px solid ${isActive ? 'rgba(0, 255, 255, 0.6)' : 'rgba(0, 255, 255, 0.2)'}`,
+  borderRadius: '4px',
+  color: '#00ffff',
+  fontSize: '12px',
+  cursor: 'pointer',
+  padding: '4px 6px',
+  pointerEvents: 'auto',
+  transition: 'all 0.2s ease',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+});
+
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
@@ -235,6 +250,9 @@ export function Overlay() {
   const setHoveredDroneId = useStore((state) => state.setHoveredDroneId);
   const missionRunning = useStore((state) => state.missionRunning);
   const setMissionRunning = useStore((state) => state.setMissionRunning);
+  
+  const { setFollowView, setPilotView, selectedDroneId } = useViewStore();
+  
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [objective, setObjective] = useState('Search the disaster zone for survivors and deliver aid.');
   const [missionStatus, setMissionStatus] = useState<string | null>(null);
@@ -350,8 +368,29 @@ export function Overlay() {
                           ● {getStatusLabel(drone.status)}
                         </div>
                       </div>
-                      <div style={batteryStyle(drone.battery, isHovered)}>
-                        {getBatteryIcon(drone.battery)} {drone.battery}%
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {/* View Switchers */}
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setFollowView(drone.drone_id); }}
+                            style={viewButtonStyle(selectedDroneId === drone.drone_id)}
+                            title="FOLLOW VIEW [F]"
+                          >
+                            👁️
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setPilotView(drone.drone_id); }}
+                            style={viewButtonStyle(selectedDroneId === drone.drone_id)}
+                            title="PILOT VIEW [P]"
+                          >
+                            🚀
+                          </button>
+                        </div>
+                        
+                        <div style={batteryStyle(drone.battery, isHovered)}>
+                          {getBatteryIcon(drone.battery)} {drone.battery}%
+                        </div>
                       </div>
                     </div>
                   );
