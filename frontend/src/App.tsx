@@ -1,12 +1,15 @@
 import { useEffect } from 'react';
 import { Scene } from './Scene';
 import { Overlay } from './Overlay';
+import { MissionLog } from './MissionLog';
 import { connectWebSocket, disconnectWebSocket, useStore } from './store';
 import './App.css';
 
 export default function App() {
   const connectionStatus = useStore((state) => state.connectionStatus);
+  const missionRunning = useStore((state) => state.missionRunning);
   const survivors = useStore((state) => state.survivors);
+  const detectedCount = survivors.filter(s => s.status !== 'UNDETECTED').length;
 
   // Connect to WebSocket on mount, disconnect on unmount
   useEffect(() => {
@@ -59,8 +62,8 @@ export default function App() {
         {/* Survivors Count */}
         <div className="hud-row">
           <span className="hud-label">VITALS</span>
-          <span className="status-text" style={{ color: survivors.length > 0 ? '#ffaa00' : '#00ff88' }}>
-            {survivors.length} DETECTED
+          <span className="status-text" style={{ color: detectedCount > 0 ? '#ffaa00' : '#00ff88' }}>
+            {detectedCount} DETECTED
           </span>
         </div>
 
@@ -69,6 +72,7 @@ export default function App() {
       </div>
 
       <Scene />
+      <MissionLog isRunning={missionRunning} />
     </div>
   );
 }

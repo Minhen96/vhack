@@ -155,11 +155,11 @@ async def move_to(drone_id: str, x: int, y: int, z: int) -> dict:
 
 
 @mcp.tool()
-async def thermal_scan(drone_id: str, radius: int = 3) -> dict:
+async def thermal_scan(drone_id: str, radius: int = 8) -> dict:
     """
     Perform an infrared thermal scan at the drone's current position.
 
-    Detects heat signatures (survivors) within the given radius (default 3).
+    Detects heat signatures (survivors) within the given radius (default 8).
     Battery cost: 5 % per scan.
     """
     drone = registry.get(drone_id)

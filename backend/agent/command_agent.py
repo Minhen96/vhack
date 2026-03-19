@@ -12,6 +12,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -22,7 +23,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from pydantic import Field, create_model
 
-load_dotenv()
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
 
@@ -274,45 +275,39 @@ async def run_mission(objective: str) -> dict[str, Any]:
                 # Build the LangGraph ReAct agent
                 agent = create_react_agent(llm, lc_tools)
 
-                # Run the agent
-                result = await agent.ainvoke({
-                    "messages": [
-                        SystemMessage(content=SYSTEM_PROMPT),
-                        HumanMessage(content=objective),
-                    ],
-                })
+                # Run the agent with streaming for real-time log updates
+                final_msgs = []
+                async for event in agent.astream_events(
+                    {
+                        "messages": [
+                            SystemMessage(content=SYSTEM_PROMPT),
+                            HumanMessage(content=objective),
+                        ],
+                    },
+                    version="v2",
+                ):
+                    kind = event["event"]
+                    name = event.get("name", "")
+                    data = event.get("data", {})
 
-                # ---- extract mission log from message history ---------------
-                for msg in result["messages"]:
-                    if isinstance(msg, AIMessage):
-                        # Reasoning / chain-of-thought
-                        if msg.content:
-                            text = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
-                            log.add("reasoning", {"message": text})
-                        # Tool calls issued by the agent
-                        if hasattr(msg, "tool_calls") and msg.tool_calls:
-                            for tc in msg.tool_calls:
-                                log.add("tool_call", {
-                                    "tool": tc["name"],
-                                    "args": tc["args"],
-                                })
-                    elif isinstance(msg, ToolMessage):
-                        content = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
-                        log.add("tool_result", {
-                            "tool": msg.name,
-                            "result": content[:800],
+                    if kind == "on_tool_start":
+                        log.add("tool_call", {
+                            "tool": name,
+                            "args": data.get("input", {}),
                         })
+                    elif kind == "on_tool_end":
+                        raw = data.get("output", "")
+                        content = str(raw)[:500] if raw is not None else ""
+                        log.add("tool_result", {"tool": name, "result": content})
+                    elif kind == "on_chat_model_end":
+                        msg = data.get("output")
+                        if msg and hasattr(msg, "content") and msg.content:
+                            text = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
+                            if not (hasattr(msg, "tool_calls") and msg.tool_calls):
+                                final_msgs.append(text)
+                            log.add("reasoning", {"message": text[:500]})
 
-                # Final output — last AI message without tool calls
-                final_msgs = [
-                    m for m in result["messages"]
-                    if isinstance(m, AIMessage)
-                    and m.content
-                    and not (hasattr(m, "tool_calls") and m.tool_calls)
-                ]
-                output = (
-                    final_msgs[-1].content if final_msgs else "Mission completed."
-                )
+                output = final_msgs[-1] if final_msgs else "Mission completed."
 
                 log.add("mission_complete", {"summary": output})
                 _is_running = False

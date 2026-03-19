@@ -2,6 +2,8 @@ import { useStore } from './store';
 import type { DroneStatus } from './store';
 import { useState } from 'react';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -178,6 +180,42 @@ const getBatteryIcon = (level: number): string => {
   return '▯▯▯▯';
 };
 
+const missionInputStyle: React.CSSProperties = {
+  width: '100%',
+  background: 'rgba(0, 255, 255, 0.05)',
+  border: '1px solid rgba(0, 255, 255, 0.25)',
+  borderRadius: '4px',
+  color: '#00ffff',
+  fontSize: '10px',
+  fontFamily: 'inherit',
+  letterSpacing: '0.5px',
+  padding: '6px 8px',
+  resize: 'none' as const,
+  outline: 'none',
+  boxSizing: 'border-box' as const,
+  pointerEvents: 'auto',
+};
+
+const launchButtonStyle = (running: boolean): React.CSSProperties => ({
+  width: '100%',
+  marginTop: '8px',
+  padding: '7px',
+  background: running
+    ? 'rgba(255, 170, 0, 0.15)'
+    : 'rgba(0, 255, 136, 0.12)',
+  border: `1px solid ${running ? 'rgba(255,170,0,0.5)' : 'rgba(0,255,136,0.4)'}`,
+  borderRadius: '4px',
+  color: running ? '#ffaa00' : '#00ff88',
+  fontSize: '10px',
+  fontFamily: 'inherit',
+  fontWeight: 700,
+  letterSpacing: '2px',
+  cursor: running ? 'default' : 'pointer',
+  pointerEvents: 'auto',
+  textShadow: `0 0 8px ${running ? '#ffaa00' : '#00ff88'}80`,
+  transition: 'all 0.2s ease',
+});
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -195,8 +233,35 @@ export function Overlay() {
   const drones = useStore((state) => state.drones);
   const connectionStatus = useStore((state) => state.connectionStatus);
   const setHoveredDroneId = useStore((state) => state.setHoveredDroneId);
+  const missionRunning = useStore((state) => state.missionRunning);
+  const setMissionRunning = useStore((state) => state.setMissionRunning);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  
+  const [objective, setObjective] = useState('Search the disaster zone for survivors and deliver aid.');
+  const [missionStatus, setMissionStatus] = useState<string | null>(null);
+
+  const launchMission = async () => {
+    if (missionRunning || !objective.trim()) return;
+    setMissionRunning(true);
+    setMissionStatus('LAUNCHING...');
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/mission/start-background`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objective: objective.trim() }),
+      });
+      const data = await res.json();
+      if (data.status === 'started') {
+        setMissionStatus('MISSION ACTIVE');
+      } else if (data.error) {
+        setMissionStatus(`ERR: ${data.error}`);
+        setMissionRunning(false);
+      }
+    } catch {
+      setMissionStatus('CONNECTION FAILED');
+      setMissionRunning(false);
+    }
+  };
+
   // Local hover state for UI styling (synced with store)
   const [hoveredDroneId, setHoveredDroneIdLocal] = useState<string | null>(null);
   
@@ -299,8 +364,8 @@ export function Overlay() {
         )}
         
         {/* Summary - always visible */}
-        <div style={{ 
-          color: 'rgba(0, 255, 255, 0.6)', 
+        <div style={{
+          color: 'rgba(0, 255, 255, 0.6)',
           fontSize: '10px',
           letterSpacing: '1px',
           display: 'flex',
@@ -309,6 +374,32 @@ export function Overlay() {
           <span>FLEET: {droneList.length}</span>
           <span>LINK: {connectionStatus.toUpperCase()}</span>
         </div>
+
+        {/* Mission Control - only when expanded */}
+        {!isCollapsed && (
+          <>
+            <div style={dividerStyle} />
+            <div style={{ color: 'rgba(0,255,255,0.5)', fontSize: '9px', letterSpacing: '2px', marginBottom: '8px' }}>
+              MISSION CONTROL
+            </div>
+            <textarea
+              style={missionInputStyle}
+              rows={2}
+              value={objective}
+              onChange={e => setObjective(e.target.value)}
+              disabled={missionRunning}
+              placeholder="Enter mission objective..."
+            />
+            <button style={launchButtonStyle(missionRunning)} onClick={launchMission} disabled={missionRunning}>
+              {missionRunning ? '⬡ MISSION ACTIVE' : '▶ LAUNCH MISSION'}
+            </button>
+            {missionStatus && (
+              <div style={{ color: missionRunning ? '#ffaa00' : '#ff5555', fontSize: '9px', letterSpacing: '1px', marginTop: '6px', textAlign: 'center' }}>
+                {missionStatus}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

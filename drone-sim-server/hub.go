@@ -1101,7 +1101,18 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 			Y: 40.0,
 			Z: 10.0,
 		},
-		Survivors: []Survivor{}, // Survivors are secret — discovered only via /scan thermal readings
+		Survivors: func() []Survivor {
+			// Send all survivors as UNDETECTED so frontend shows them dim.
+			// They light up (DETECTED) when the drone's thermal scan finds them.
+			SurvivorsMutex.RLock()
+			defer SurvivorsMutex.RUnlock()
+			list := make([]Survivor, len(Survivors))
+			for i, s := range Survivors {
+				list[i] = s
+				list[i].Status = "UNDETECTED"
+			}
+			return list
+		}(),
 		Buildings: Buildings,
 	}
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 // =============================================================================
@@ -118,8 +119,8 @@ func runServer() {
 	server := &http.Server{
 		Addr:           ":" + port,
 		Handler:        mux,
-		ReadTimeout:    60,
-		WriteTimeout:   60,
+		ReadTimeout:    60 * time.Second,
+		WriteTimeout:   60 * time.Second,
 		MaxHeaderBytes: 4096,
 	}
 

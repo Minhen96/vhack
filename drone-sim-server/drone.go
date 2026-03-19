@@ -18,8 +18,6 @@ import (
 // =============================================================================
 
 const (
-	defaultWsURL = "ws://localhost:8080/ws/drone"
-
 	// Reconnection settings with exponential backoff
 	initialReconnectDelay = 1 * time.Second  // Start with 1 second
 	maxReconnectDelay     = 30 * time.Second // Cap at 30 seconds
@@ -83,9 +81,13 @@ type LawnmowerConfig struct {
 
 // NewMockDrone creates a new mock drone client instance
 func NewMockDrone(droneID string, config LawnmowerConfig) *MockDrone {
+	wsURL := os.Getenv("MAP_WS_URL")
+	if wsURL == "" {
+		wsURL = "ws://localhost:8080/ws/drone"
+	}
 	return &MockDrone{
 		droneID:               droneID,
-		serverURL:              defaultWsURL,
+		serverURL:              wsURL,
 		currentX:               config.GridMinX,
 		currentZ:               config.GridMinZ,
 		altitude:               15.0,

@@ -66,9 +66,11 @@ export function Human({ survivor }: { survivor: Survivor }) {
         const originalMaterial = child.material as THREE.MeshStandardMaterial
         const clonedMaterial = originalMaterial.clone()
         
-        // Add thermal emissive properties
-        clonedMaterial.emissive = new THREE.Color('#ff4400')
-        clonedMaterial.emissiveIntensity = 0.3
+        // Emissive color: dim blue for undetected, thermal orange for detected
+        clonedMaterial.emissive = new THREE.Color(survivor.status === 'UNDETECTED' ? '#224466' : '#ff4400')
+        clonedMaterial.emissiveIntensity = survivor.status === 'UNDETECTED' ? 0.05 : 0.3
+        clonedMaterial.transparent = survivor.status === 'UNDETECTED'
+        clonedMaterial.opacity = survivor.status === 'UNDETECTED' ? 0.4 : 1.0
         clonedMaterial.needsUpdate = true
         
         // Store reference for animation
@@ -85,13 +87,13 @@ export function Human({ survivor }: { survivor: Survivor }) {
     return clonedScene
   }, [scene, survivorNumber])
 
-  // Animate thermal pulsation
+  const isUndetected = survivor.status === 'UNDETECTED'
+
+  // Animate thermal pulsation (only for detected survivors)
   useFrame((state) => {
-    // Pulsating emissive effect (thermal signature animation)
+    if (isUndetected) return
     const time = state.clock.getElapsedTime()
-    emissiveIntensityRef.current = Math.sin(time * 2) * 0.2 + 0.4 // Oscillates between 0.2 and 0.6
-    
-    // Update all mesh materials in the group
+    emissiveIntensityRef.current = Math.sin(time * 2) * 0.2 + 0.4
     if (groupRef.current) {
       groupRef.current.traverse((child) => {
         if (child instanceof THREE.Mesh) {
@@ -107,36 +109,27 @@ export function Human({ survivor }: { survivor: Survivor }) {
   return (
     <group
       ref={groupRef}
-      position={[
-        survivor.position.x,
-        survivor.position.y,
-        survivor.position.z
-      ]}
-      rotation={[0, Math.PI, 0]} // Face the camera/drone
-      scale={0.8} // Scale down slightly for human models
+      position={[survivor.position.x, survivor.position.y, survivor.position.z]}
+      rotation={[0, Math.PI, 0]}
+      scale={0.8}
     >
-      {/* Render the enhanced GLTF model */}
       <primitive object={enhancedScene} />
-      
-      {/* Additional thermal glow light for visibility */}
-      <pointLight
-        position={[0, 1, 0]}
-        color="#ff4400"
-        intensity={0.5}
-        distance={5}
-        decay={2}
-      />
-      
-      {/* Ground glow indicator */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-        <ringGeometry args={[0.4, 1.2, 32]} />
-        <meshBasicMaterial
-          color="#ff5500"
-          transparent
-          opacity={0.15}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+
+      {/* Dim ghost indicator for undetected, bright thermal glow when detected */}
+      {isUndetected ? (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+          <ringGeometry args={[0.4, 1.0, 32]} />
+          <meshBasicMaterial color="#4488ff" transparent opacity={0.08} side={THREE.DoubleSide} />
+        </mesh>
+      ) : (
+        <>
+          <pointLight position={[0, 1, 0]} color="#ff4400" intensity={0.5} distance={5} decay={2} />
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
+            <ringGeometry args={[0.4, 1.2, 32]} />
+            <meshBasicMaterial color="#ff5500" transparent opacity={0.15} side={THREE.DoubleSide} />
+          </mesh>
+        </>
+      )}
     </group>
   )
 }

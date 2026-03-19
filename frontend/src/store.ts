@@ -76,7 +76,7 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'er
 export type DroneStatus = 'SCANNING' | 'RETURNING' | 'IDLE' | 'SEARCHING';
 
 /** Survivor status */
-export type SurvivorStatus = 'DETECTED' | 'CONFIRMED' | 'RESCUED';
+export type SurvivorStatus = 'UNDETECTED' | 'DETECTED' | 'CONFIRMED' | 'RESCUED';
 
 /** WebSocket message types */
 type WebSocketMessageType =
@@ -123,6 +123,9 @@ interface DroneStore {
   // Hover state for UI interaction
   hoveredDroneId: string | null;
 
+  // Mission state
+  missionRunning: boolean;
+
   // Actions
   setConnectionStatus: (status: ConnectionStatus) => void;
   setDrone: (drone: DroneState) => void;
@@ -136,6 +139,7 @@ interface DroneStore {
   addHeatTiles: (tiles: Array<{ x: number; y: number; temp_celsius: number }>) => void;
   setHoveredDroneId: (droneId: string | null) => void;
   setWsUrl: (url: string) => void;
+  setMissionRunning: (running: boolean) => void;
   reset: () => void;
 }
 
@@ -217,101 +221,50 @@ function updateDronesRef(drone: DroneState): void {
 }
 
 // =============================================================================
-// WebSocket Management - Sending (UI -> Go)
+// WebSocket Management - Single connection for send and receive
 // =============================================================================
 
-let wsSend: WebSocket | null = null;
-let wsReceive: WebSocket | null = null;
-let reconnectTimeoutSend: ReturnType<typeof setTimeout> | null = null;
-let reconnectTimeoutReceive: ReturnType<typeof setTimeout> | null = null;
-let reconnectDelaySend = 1000;
-let reconnectDelayReceive = 1000;
-const maxReconnectDelay = 30000; // Max 30 seconds
+let ws: WebSocket | null = null;
+let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+let reconnectDelay = 1000;
+const maxReconnectDelay = 30000;
 
-/**
- * Connect to WebSocket server for sending messages (UI -> Go)
- */
-export function connectWebSocketSend(url?: string): void {
+export function connectWebSocket(url?: string): void {
   const wsUrl = url || import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws/ui';
-  
-  // Clean up existing connection
-  if (wsSend) {
-    wsSend.close();
-    wsSend = null;
-  }
-  
-  if (reconnectTimeoutSend) {
-    clearTimeout(reconnectTimeoutSend);
-    reconnectTimeoutSend = null;
-  }
-  
-  try {
-    wsSend = new WebSocket(wsUrl);
-    
-    wsSend.onopen = () => {
-      console.log('🔗 WebSocket SEND connected:', wsUrl);
-    };
-    
-    wsSend.onclose = (event) => {
-      console.log('🔌 WebSocket SEND closed:', event.code, event.reason);
-      scheduleReconnectSend(wsUrl);
-    };
-    
-    wsSend.onerror = (error) => {
-      console.error('❌ WebSocket SEND error:', error);
-    };
-  } catch (error) {
-    console.error('Failed to create WebSocket SEND:', error);
-    scheduleReconnectSend(wsUrl);
-  }
-}
 
-/**
- * Connect to WebSocket server for receiving messages (Go -> UI)
- * 
- * IMPORTANT: UI clients must connect to /ws/ui to receive broadcasts from the hub.
- * The hub broadcasts drone positions to UI clients connected to /ws/ui.
- */
-export function connectWebSocketReceive(url?: string): void {
-  // FIX: Connect to /ws/ui instead of /ws/drone to receive broadcasts
-  // The hub broadcasts to UI clients on /ws/ui, not drone clients on /ws/drone
-  const wsUrl = url || import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws/ui';
-  
-  // Clean up existing connection
-  if (wsReceive) {
-    wsReceive.close();
-    wsReceive = null;
+  if (ws) {
+    ws.close();
+    ws = null;
   }
-  
-  if (reconnectTimeoutReceive) {
-    clearTimeout(reconnectTimeoutReceive);
-    reconnectTimeoutReceive = null;
+
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
   }
-  
-  // Update store connection status
+
   useStore.getState().setConnectionStatus('connecting');
-  
+
   try {
-    wsReceive = new WebSocket(wsUrl);
-    
-    wsReceive.onopen = () => {
-      console.log('🔗 WebSocket RECEIVE connected:', wsUrl);
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      console.log('🔗 WebSocket connected:', wsUrl);
       useStore.getState().setConnectionStatus('connected');
-      reconnectDelayReceive = 1000; // Reset reconnect delay on successful connection
+      reconnectDelay = 1000;
     };
-    
-    wsReceive.onclose = (event) => {
-      console.log('🔌 WebSocket RECEIVE closed:', event.code, event.reason);
+
+    ws.onclose = (event) => {
+      console.log('🔌 WebSocket closed:', event.code, event.reason);
       useStore.getState().setConnectionStatus('disconnected');
-      scheduleReconnectReceive(wsUrl);
+      reconnectTimeout = setTimeout(() => connectWebSocket(wsUrl), reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
     };
-    
-    wsReceive.onerror = (error) => {
-      console.error('❌ WebSocket RECEIVE error:', error);
+
+    ws.onerror = () => {
       useStore.getState().setConnectionStatus('error');
     };
-    
-    wsReceive.onmessage = (event) => {
+
+    ws.onmessage = (event) => {
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
         handleWebSocketMessage(message);
@@ -320,92 +273,36 @@ export function connectWebSocketReceive(url?: string): void {
       }
     };
   } catch (error) {
-    console.error('Failed to create WebSocket RECEIVE:', error);
+    console.error('Failed to create WebSocket:', error);
     useStore.getState().setConnectionStatus('error');
-    scheduleReconnectReceive(wsUrl);
+    reconnectTimeout = setTimeout(() => connectWebSocket(wsUrl), reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
   }
 }
 
-/**
- * Connect to both WebSocket servers
- */
-export function connectWebSocket(url?: string): void {
-  connectWebSocketSend(url);
-  connectWebSocketReceive(url);
-}
+// Keep legacy exports so existing callers don't break
+export const connectWebSocketSend = connectWebSocket;
+export const connectWebSocketReceive = connectWebSocket;
 
-/**
- * Send message to Go server via WebSocket
- * @param payload - Object to send as JSON
- */
 export function sendMessage(payload: object): void {
-  if (wsSend && wsSend.readyState === WebSocket.OPEN) {
-    wsSend.send(JSON.stringify(payload));
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload));
   } else {
     console.warn('WebSocket not connected for sending');
   }
 }
 
-/**
- * Schedule reconnection for send WebSocket with exponential backoff
- */
-function scheduleReconnectSend(url: string): void {
-  if (reconnectTimeoutSend) {
-    clearTimeout(reconnectTimeoutSend);
-  }
-  
-  console.log(`🔄 Scheduling SEND reconnect in ${reconnectDelaySend}ms...`);
-  
-  reconnectTimeoutSend = setTimeout(() => {
-    connectWebSocketSend(url);
-  }, reconnectDelaySend);
-  
-  // Exponential backoff
-  reconnectDelaySend = Math.min(reconnectDelaySend * 2, maxReconnectDelay);
-}
-
-/**
- * Schedule reconnection for receive WebSocket with exponential backoff
- */
-function scheduleReconnectReceive(url: string): void {
-  if (reconnectTimeoutReceive) {
-    clearTimeout(reconnectTimeoutReceive);
-  }
-  
-  console.log(`🔄 Scheduling RECEIVE reconnect in ${reconnectDelayReceive}ms...`);
-  
-  reconnectTimeoutReceive = setTimeout(() => {
-    connectWebSocketReceive(url);
-  }, reconnectDelayReceive);
-  
-  // Exponential backoff
-  reconnectDelayReceive = Math.min(reconnectDelayReceive * 2, maxReconnectDelay);
-}
-
-/**
- * Disconnect WebSocket
- */
 export function disconnectWebSocket(): void {
-  if (reconnectTimeoutSend) {
-    clearTimeout(reconnectTimeoutSend);
-    reconnectTimeoutSend = null;
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
   }
-  
-  if (reconnectTimeoutReceive) {
-    clearTimeout(reconnectTimeoutReceive);
-    reconnectTimeoutReceive = null;
+
+  if (ws) {
+    ws.close();
+    ws = null;
   }
-  
-  if (wsSend) {
-    wsSend.close();
-    wsSend = null;
-  }
-  
-  if (wsReceive) {
-    wsReceive.close();
-    wsReceive = null;
-  }
-  
+
   useStore.getState().setConnectionStatus('disconnected');
 }
 
@@ -488,7 +385,7 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
       if (existingIndex >= 0) {
         useStore.getState().updateSurvivor(
           useStore.getState().survivors[existingIndex].id,
-          { confidence: Math.max(useStore.getState().survivors[existingIndex].confidence, survivor.confidence) }
+          { confidence: Math.max(useStore.getState().survivors[existingIndex].confidence, survivor.confidence), status: survivor.status }
         );
       } else {
         useStore.getState().addSurvivor(survivor);
@@ -540,17 +437,27 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
       break;
     }
     
-    case 'init_connection': {
+        case 'init_connection': {
       const initData = message as unknown as {
         type: string;
         timestamp: number;
         buildings?: Building[];
+        survivors?: Array<{ id: string; x: number; y: number; z: number; status: string }>;
       };
 
-      // Survivors are NOT loaded here — they are secret until the drone scans and
-      // sends survivor_detected messages. This creates the realistic discovery flow.
+      if (initData.survivors && initData.survivors.length > 0) {
+        const undetected: Survivor[] = initData.survivors.map(s => ({
+          id: s.id,
+          position: { x: s.x, y: 0.3, z: s.z },
+          status: 'UNDETECTED' as SurvivorStatus,
+          confidence: 0,
+          thermalSignature: false,
+          timestamp: Date.now(),
+          detected_by: '',
+        }));
+        useStore.getState().setSurvivors(undetected);
+      }
 
-      // Process buildings — rendered as 3D box obstacles
       if (initData.buildings && initData.buildings.length > 0) {
         useStore.getState().setBuildings(initData.buildings);
       }
@@ -576,6 +483,7 @@ const initialState = {
   buildings: [] as Building[],
   heatTiles: {} as Record<string, number>,
   hoveredDroneId: null,
+  missionRunning: false,
 };
 
 export const useStore = create<DroneStore>((set) => ({
@@ -631,8 +539,10 @@ export const useStore = create<DroneStore>((set) => ({
   }),
 
   setHoveredDroneId: (droneId) => set({ hoveredDroneId: droneId }),
-  
+
   setWsUrl: (url) => set({ wsUrl: url }),
+
+  setMissionRunning: (running) => set({ missionRunning: running }),
   
   reset: () => {
     dronesRef.subscribers.clear();

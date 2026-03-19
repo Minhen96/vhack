@@ -229,19 +229,16 @@ export function Drone({ droneId }: DroneProps) {
       spot.intensity = THREE.MathUtils.mapLinear(altitude, 5, 30, 80, 30);
     }
     
-    // 8. Update sensor cone visualization
+    // 8. Update sensor disc visualization
     if (coneRef.current) {
-      const coneHeight = spherical.scan_radius * 2;
-      const coneRadius = Math.tan(THREE.MathUtils.degToRad(spherical.fov / 2)) * coneHeight;
+      const newRadius = spherical.scan_radius;
 
-      // Only recreate geometry when scan_radius or fov actually changes (not every frame)
-      if (spherical.scan_radius !== prevScanRadius.current || spherical.fov !== prevFov.current) {
+      // Only recreate geometry when scan_radius changes
+      if (spherical.scan_radius !== prevScanRadius.current) {
         prevScanRadius.current = spherical.scan_radius;
-        prevFov.current = spherical.fov;
-        const coneGeo = coneRef.current.geometry as THREE.ConeGeometry;
-        coneGeo.dispose();
-        coneRef.current.geometry = new THREE.ConeGeometry(coneRadius, coneHeight, 32, 1, true);
-        coneRef.current.position.y = -coneHeight / 2;
+        const discGeo = coneRef.current.geometry as THREE.CircleGeometry;
+        discGeo.dispose();
+        coneRef.current.geometry = new THREE.CircleGeometry(newRadius, 48);
       }
 
       // Pulse cone opacity: active scan = rhythmic glow, idle = faint
@@ -327,8 +324,7 @@ export function Drone({ droneId }: DroneProps) {
   });
 
   const spherical = currentSpherical.current;
-  const coneHeight = spherical.scan_radius * 2;
-  const coneRadius = Math.tan(THREE.MathUtils.degToRad(spherical.fov / 2)) * coneHeight;
+  const coneRadius = spherical.scan_radius;
   const altitude = currentPos.current.y;
 
   return (
@@ -474,13 +470,13 @@ export function Drone({ droneId }: DroneProps) {
             SENSOR FOV VISUALIZATION
         ========================================================================= */}
         
-        {/* Transparent cone showing scan area */}
-        <mesh 
+        {/* Flat scan disc — shows coverage area on the ground */}
+        <mesh
           ref={coneRef}
-          position={[0, -coneHeight / 2, 0]}
-          rotation={[Math.PI, 0, 0]}
+          position={[0, -0.5, 0]}
+          rotation={[Math.PI / 2, 0, 0]}
         >
-          <coneGeometry args={[coneRadius, coneHeight, 32, 1, true]} />
+          <circleGeometry args={[coneRadius, 48]} />
           <primitive object={materials.sensorCone} />
         </mesh>
         

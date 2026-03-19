@@ -6,8 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-MCP_URL = os.getenv("MCP_URL", "http://localhost:9000")
-MAP_WS_URL = os.getenv("MAP_WS_URL", "ws://localhost:9001/ws/drone")
+MCP_URL = os.getenv("MCP_URL", "http://localhost:8000")
+MAP_WS_URL = os.getenv("MAP_WS_URL", "ws://localhost:8080/ws/drone")
 
 DRONE_HOST = os.getenv("DRONE_HOST", "localhost")
 DRONE_PORT = int(os.getenv("DRONE_PORT", "8001"))
