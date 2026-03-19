@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"log"
@@ -143,7 +144,9 @@ func runServer() {
 	log.Println("Shutting down server...")
 
 	// Give outstanding requests a chance to complete
-	if err := server.Shutdown(nil); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	}
 

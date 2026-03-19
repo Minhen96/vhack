@@ -2,7 +2,6 @@ import { useRef, useMemo, Suspense } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import {
   Environment,
-  Loader,
 } from '@react-three/drei';
 import {
   EffectComposer,
@@ -10,12 +9,11 @@ import {
   Vignette,
   SSAO,
   SMAA,
-  ColorAverage,
 } from '@react-three/postprocessing';
 import { BlendFunction } from 'postprocessing';
 import * as THREE from 'three';
 
-import { Drone, Drones } from './Drone';
+import { Drones } from './Drone';
 import { Rubble } from './Rubble';
 import { Survivors } from './Survivors';
 import { Buildings } from './Buildings';

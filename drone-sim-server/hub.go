@@ -1,18 +1,18 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
-	"net"
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/lxzan/gws"
+	"github.com/segmentio/encoding/json"
 )
 
 // Seed random number generator globally
@@ -30,16 +30,15 @@ const (
 	// UIClient represents a UI/client connection
 	UIClient = "ui"
 
-	// Connection timing constants - tuned for stability
-	// Read deadline should be longer than ping interval to allow for network latency
-	ServerPingInterval = 25 * time.Second  // Ping interval
-	ServerReadDeadline = 60 * time.Second  // Read deadline (longer for reconnection resilience)
-	ServerWriteDeadline = 10 * time.Second // Write deadline for messages
+	// Connection timing constants - Optimized for high-frequency drones
+	ServerPingInterval = 5 * time.Second   // Ping interval (User requested 5-10s)
+	ServerReadDeadline = 15 * time.Second  // Read deadline
+	ServerWriteDeadline = 5 * time.Second  // Write deadline
 
 	// Connection health monitoring
-	HealthCheckInterval = 10 * time.Second // How often to check connection health
-	MaxMissedPings      = 3                 // Max missed pings before considering connection dead
-	ConnectionTimeout   = 30 * time.Second // Max time to establish initial connection
+	HealthCheckInterval = 5 * time.Second  // How often to check connection health
+	MaxMissedPings      = 2                // Max missed pings before considering connection dead
+	ConnectionTimeout   = 10 * time.Second // Max time to establish initial connection
 
 	// Channel buffer sizes for backpressure
 	ClientSendBufferSize    = 256 // Buffer for outbound messages
@@ -238,30 +237,31 @@ func GetBuildingBlockedCells() []BlockedArea {
 // Client Struct - Queue-based architecture
 // =============================================================================
 
+// bufferPool minimizes GC pauses for high-frequency telemetry
+var bufferPool = sync.Pool{
+	New: func() any {
+		// Default to 4KB buffers
+		b := make([]byte, 0, 4096)
+		return &b
+	},
+}
+
+// =============================================================================
+// Client Struct - Non-Blocking Send Channel
+// =============================================================================
+
 // Client represents a WebSocket connection in the hub
-// Uses dedicated channels for send/receive to eliminate mutex locks
 type Client struct {
 	// Hub is the pointer to the Hub that manages this client
 	Hub *Hub
-	// Conn is the WebSocket connection
-	Conn *websocket.Conn
-	// Send is a buffered channel for outgoing messages (write queue)
-	// WritePump is the only goroutine that reads from this channel
+	// Conn is the gws WebSocket connection
+	Conn *gws.Conn
+	// Send is a buffered channel for outgoing messages (Zero-Pressure)
 	Send chan []byte
-	// Receive is a buffered channel for incoming messages (read queue)
-	// ReadPump writes to this channel, Hub's listener reads from it
-	Receive chan []byte
 	// ClientType is either "drone" or "ui"
 	ClientType string
 	// DroneID is the unique identifier for drone clients (empty for UI)
 	DroneID string
-
-	// Connection health tracking
-	lastPingTime      time.Time     // Last time we received a ping/activity
-	missedPings       int           // Number of missed pings
-	isHealthy         bool          // Connection health status
-	healthCheckTicker *time.Ticker  // Health check ticker
-	wg                sync.WaitGroup // WaitGroup for graceful shutdown
 
 	// quit channel for graceful shutdown
 	quit chan struct{}
@@ -274,34 +274,28 @@ type Client struct {
 // Hub maintains the set of active clients and routes messages through channels
 // Uses pure channel-based communication - no mutex locks on client maps
 type Hub struct {
-	// Client registration/unregistration via channels (no mutex needed)
+	// Client registration/unregistration via channels
 	Register   chan *Client
 	Unregister chan *Client
 
 	// Broadcast channel for messages to all UI clients
 	Broadcast chan []byte
 
-	// Dedicated routing channels (channel-based message bus)
-	// DroneMessages: messages from drones to be routed to UI
+	// Dedicated routing channels
 	DroneMessages chan []byte
-	// UIMessages: messages from UI to be routed to drones
-	UIMessages chan []byte
+	UIMessages    chan []byte
 
-	// DroneState mutex for thread-safe access to drone state (acceptable)
-	DroneState sync.RWMutex
+	// Statistics and Reliability
+	droppedPackets uint64
 
-	// Connection statistics
-	totalConnections    int64
-	totalDisconnections int64
-
-	// Internal state tracking (protected by mutex for stats only)
+	// Internal state tracking
 	mu sync.RWMutex
-	// DroneClients map for stats and iteration (read-only, updated via channels)
+	// DroneClients map
 	DroneClients map[*Client]bool
-	// UIClients map for stats and iteration (read-only, updated via channels)
+	// UIClients map
 	UIClients map[*Client]bool
 
-	// Last known send_position message per drone — replayed to new UI clients on connect
+	// Last known send_position message per drone
 	lastPositionMsg map[string][]byte
 }
 
@@ -309,7 +303,7 @@ type Hub struct {
 // Hub Methods - Pure queue-based implementation
 // =============================================================================
 
-// NewHub creates and returns a new Hub instance with channel-based architecture
+// NewHub creates and returns a new Hub instance
 func NewHub() *Hub {
 	return &Hub{
 		Register:        make(chan *Client),
@@ -323,45 +317,112 @@ func NewHub() *Hub {
 	}
 }
 
+// =============================================================================
+// gws.EventHandler Implementation
+// =============================================================================
+
+func (h *Hub) OnOpen(c *gws.Conn) {
+	// Handled in ServeWs
+}
+
+func (h *Hub) OnClose(c *gws.Conn, err error) {
+	if val, ok := c.Session().Load("client"); ok {
+		if client, ok := val.(*Client); ok {
+			h.Unregister <- client
+		}
+	}
+}
+
+func (h *Hub) OnPing(c *gws.Conn, payload []byte) {
+	_ = c.WritePong(payload)
+}
+
+func (h *Hub) OnPong(c *gws.Conn, payload []byte) {
+	// gws handles read deadlines internally based on activity
+}
+
+func (h *Hub) OnMessage(c *gws.Conn, message *gws.Message) {
+	defer message.Close()
+	val, ok := c.Session().Load("client")
+	if !ok {
+		return
+	}
+	client, ok := val.(*Client)
+	if !ok {
+		return
+	}
+
+	// Zero-copy byte slice (valid until message.Close() which is deferred)
+	data := message.Bytes()
+	
+	// Create a stable copy for the hub channels if needed
+	// Hub channels are buffered, so we usually don't need a copy if processed immediately
+	// but since we have multiple consumers potentially, let's copy.
+	msgCopy := make([]byte, len(data))
+	copy(msgCopy, data)
+
+	if client.ClientType == DroneClient {
+		select {
+		case h.DroneMessages <- msgCopy:
+		default:
+			atomic.AddUint64(&h.droppedPackets, 1)
+		}
+	} else {
+		select {
+		case h.UIMessages <- msgCopy:
+		default:
+			atomic.AddUint64(&h.droppedPackets, 1)
+		}
+	}
+}
+
 // Run is the main hub goroutine that handles all events via channels
 // This is the central message router - all client communication flows through here
 func (h *Hub) Run() {
+	// Create ticker for periodic grid snapshots (e.g., every 5 seconds)
+	// This helps clients stay in sync even if updates are dropped.
+	snapshotTicker := time.NewTicker(5 * time.Second)
+	defer snapshotTicker.Stop()
+
 	for {
 		select {
 		case client := <-h.Register:
-			// Channel-based client registration
 			h.registerClient(client)
 
 		case client := <-h.Unregister:
-			// Channel-based client unregistration
 			h.unregisterClient(client)
 
 		case message := <-h.Broadcast:
-			// Broadcast message to all UI clients
+			// Regular broadcast to all UI clients
 			h.broadcastToUIClients(message)
 
 		case message := <-h.DroneMessages:
-			// Messages from drones - handle and broadcast to UI clients
 			h.handleDroneMessage(message)
 
 		case message := <-h.UIMessages:
-			// Messages from UI - handle and route to appropriate drone
 			h.handleUIMessage(message)
+
+		case <-snapshotTicker.C:
+			h.broadcastGridSnapshot()
 		}
+	}
+}
+
+// broadcastGridSnapshot sends a full state sync to all UI clients
+func (h *Hub) broadcastGridSnapshot() {
+	snapshot := h.GetInitialGridSnapshot()
+	snapshot.Timestamp = time.Now().UnixMilli()
+
+	if data, err := json.Marshal(snapshot); err == nil {
+		h.broadcastToUIClients(data)
 	}
 }
 
 // registerClient adds a client and starts its listener goroutine
 // Uses channel-based routing - no mutex locks
 func (h *Hub) registerClient(client *Client) {
-	// Initialize client health tracking
-	client.lastPingTime = time.Now()
-	client.missedPings = 0
-	client.isHealthy = true
-
-	// Initialize channels
+	// Initialize non-blocking send channel
 	client.Send = make(chan []byte, ClientSendBufferSize)
-	client.Receive = make(chan []byte, ClientReceiveBufferSize)
 	client.quit = make(chan struct{})
 
 	switch client.ClientType {
@@ -369,32 +430,26 @@ func (h *Hub) registerClient(client *Client) {
 		h.mu.Lock()
 		h.DroneClients[client] = true
 		h.mu.Unlock()
-		log.Printf("📡 Drone client registered: %s (Total drones: %d)", client.DroneID, h.getDroneCount())
-
-		// Start listener for drone's receive channel
-		go h.droneMessageListener(client)
+		log.Printf("📡 Drone client registered: %s", client.DroneID)
 
 	case UIClient:
 		h.mu.Lock()
 		h.UIClients[client] = true
-		// Snapshot cached positions while holding the lock
+		// Snapshot cached positions
 		cachedPositions := make([][]byte, 0, len(h.lastPositionMsg))
 		for _, msg := range h.lastPositionMsg {
 			cachedPositions = append(cachedPositions, msg)
 		}
 		h.mu.Unlock()
-		log.Printf("🖥️  UI client registered (Total UI: %d)", h.getUICount())
+		log.Printf("🖥️  UI client registered")
 
-		// Replay last known drone positions so the UI sees drones immediately
+		// Replay last known drone positions
 		for _, msg := range cachedPositions {
 			select {
 			case client.Send <- msg:
 			default:
 			}
 		}
-
-		// Start listener for UI's receive channel
-		go h.uiMessageListener(client)
 
 	default:
 		log.Printf("⚠️  Unknown client type: %s", client.ClientType)
@@ -407,11 +462,6 @@ func (h *Hub) unregisterClient(client *Client) {
 	// Signal the client to stop its pumps
 	close(client.quit)
 
-	// Stop health check ticker if running
-	if client.healthCheckTicker != nil {
-		client.healthCheckTicker.Stop()
-	}
-
 	switch client.ClientType {
 	case DroneClient:
 		h.mu.Lock()
@@ -421,18 +471,13 @@ func (h *Hub) unregisterClient(client *Client) {
 
 			// Close channels
 			close(client.Send)
-			close(client.Receive)
 
 			// Remove from global drone state
 			DroneMutex.Lock()
 			delete(Drones, client.DroneID)
 			DroneMutex.Unlock()
 
-			if client.isHealthy {
-				log.Printf("🛑 Drone client unregistered: %s (Total drones: %d)", client.DroneID, h.getDroneCount())
-			} else {
-				log.Printf("💔 Drone client disconnected (unhealthy): %s (Total drones: %d)", client.DroneID, h.getDroneCount())
-			}
+			log.Printf("🛑 Drone client unregistered: %s", client.DroneID)
 		} else {
 			h.mu.Unlock()
 		}
@@ -445,71 +490,10 @@ func (h *Hub) unregisterClient(client *Client) {
 
 			// Close channels
 			close(client.Send)
-			close(client.Receive)
 
-			log.Printf("🖥️  UI client unregistered (Total UI: %d)", h.getUICount())
+			log.Printf("🖥️  UI client unregistered")
 		} else {
 			h.mu.Unlock()
-		}
-	}
-}
-
-// droneMessageListener listens to a drone client's receive channel
-// and routes messages to the hub's DroneMessages channel
-// This is the ReadPump → Hub routing: WS → Receive → Hub
-func (h *Hub) droneMessageListener(client *Client) {
-	defer func() {
-		// Signal hub to unregister this client
-		h.Unregister <- client
-	}()
-
-	for {
-		select {
-		case message, ok := <-client.Receive:
-			if !ok {
-				// Channel closed, client disconnected
-				return
-			}
-			// Route to hub for processing
-			select {
-			case h.DroneMessages <- message:
-			default:
-				log.Printf("⚠️  DroneMessages channel full for %s", client.getClientIdentifier())
-			}
-
-		case <-client.quit:
-			// Received quit signal
-			return
-		}
-	}
-}
-
-// uiMessageListener listens to a UI client's receive channel
-// and routes messages to the hub's UIMessages channel
-// This is the ReadPump → Hub routing: WS → Receive → Hub
-func (h *Hub) uiMessageListener(client *Client) {
-	defer func() {
-		// Signal hub to unregister this client
-		h.Unregister <- client
-	}()
-
-	for {
-		select {
-		case message, ok := <-client.Receive:
-			if !ok {
-				// Channel closed, client disconnected
-				return
-			}
-			// Route to hub for processing
-			select {
-			case h.UIMessages <- message:
-			default:
-				log.Printf("⚠️  UIMessages channel full for %s", client.getClientIdentifier())
-			}
-
-		case <-client.quit:
-			// Received quit signal
-			return
 		}
 	}
 }
@@ -527,12 +511,8 @@ func (h *Hub) handleDroneMessage(message []byte) {
 
 	switch msgType.Type {
 	case MessageTypeSendPosition:
-		// Parse position data and update DroneState map
+		// Parse position data, update state, and broadcast with SeqNum
 		h.handleSendPosition(message)
-		// Cache for replay to future UI clients
-		h.cacheDronePosition(message)
-		// Broadcast to UI clients
-		h.broadcastToUIClients(message)
 
 	case MessageTypeSurvivorDetected:
 		// Parse survivor detection from drone
@@ -552,14 +532,7 @@ func (h *Hub) handleDroneMessage(message []byte) {
 
 // handleSendPosition updates the DroneState map with the drone's current position
 func (h *Hub) handleSendPosition(message []byte) {
-	var posMsg struct {
-		Type      string  `json:"type"`
-		DroneID   string  `json:"drone_id"`
-		X         float64 `json:"x"`
-		Y         float64 `json:"y"`
-		Z         float64 `json:"z"`
-		Timestamp int64   `json:"timestamp"`
-	}
+	var posMsg SendPosition
 
 	if err := json.Unmarshal(message, &posMsg); err != nil {
 		log.Printf("⚠️  Error parsing position message: %v", err)
@@ -568,8 +541,6 @@ func (h *Hub) handleSendPosition(message []byte) {
 
 	// Update drone state with thread-safe access
 	DroneMutex.Lock()
-	defer DroneMutex.Unlock()
-
 	Drones[posMsg.DroneID] = &DroneState{
 		ID:        posMsg.DroneID,
 		X:         posMsg.X,
@@ -577,8 +548,15 @@ func (h *Hub) handleSendPosition(message []byte) {
 		Z:         posMsg.Z,
 		Timestamp: time.UnixMilli(posMsg.Timestamp),
 	}
+	DroneMutex.Unlock()
 
-	log.Printf("📍 Drone %s position updated: (%.2f, %.2f, %.2f)", posMsg.DroneID, posMsg.X, posMsg.Y, posMsg.Z)
+	// Cache for replay to future UI clients
+	h.cacheDronePosition(message)
+	// Broadcast to UI clients
+	h.broadcastToUIClients(message)
+
+	log.Printf("📍 Drone %s position updated: (%.2f, %.2f, %.2f)", 
+		posMsg.DroneID, posMsg.X, posMsg.Y, posMsg.Z)
 }
 
 // cacheDronePosition stores the latest send_position message per drone ID
@@ -597,15 +575,7 @@ func (h *Hub) cacheDronePosition(message []byte) {
 
 // handleSurvivorDetected logs and processes survivor detection events
 func (h *Hub) handleSurvivorDetected(message []byte) {
-	var detectMsg struct {
-		Type      string  `json:"type"`
-		DroneID   string  `json:"drone_id"`
-		X         float64 `json:"x"`
-		Y         float64 `json:"y"`
-		Z         float64 `json:"z"`
-		Confidence float64 `json:"confidence"`
-		Timestamp int64   `json:"timestamp"`
-	}
+	var detectMsg SurvivorDetected
 
 	if err := json.Unmarshal(message, &detectMsg); err != nil {
 		log.Printf("⚠️  Error parsing survivor_detected message: %v", err)
@@ -679,11 +649,11 @@ func (h *Hub) BroadcastToUI(message []byte) {
 	select {
 	case h.Broadcast <- message:
 	default:
-		log.Printf("⚠️  Broadcast channel full, dropping message")
+		atomic.AddUint64(&h.droppedPackets, 1)
 	}
 }
 
-// BroadcastToDrones sends a message to all connected drone clients
+// BroadcastToDrones sends a message to all connected drone clients (Zero-Pressure)
 func (h *Hub) BroadcastToDrones(message []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -692,17 +662,13 @@ func (h *Hub) BroadcastToDrones(message []byte) {
 		select {
 		case client.Send <- message:
 		default:
-			// If send channel is full, log and remove unhealthy client
-			log.Printf("⚠️  Removing unresponsive drone client: %s (send channel full)", client.getClientIdentifier())
-			// Signal unregister via channel
-			go func(c *Client) {
-				h.Unregister <- c
-			}(client)
+			// Discard message to prevent backpressure
+			atomic.AddUint64(&h.droppedPackets, 1)
 		}
 	}
 }
 
-// broadcastToUIClients sends to all UI clients using channel-based routing
+// broadcastToUIClients sends to all UI clients (Zero-Pressure)
 func (h *Hub) broadcastToUIClients(message []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -711,11 +677,8 @@ func (h *Hub) broadcastToUIClients(message []byte) {
 		select {
 		case client.Send <- message: 
 		default:
-			// If send channel is full, log and handle gracefully
-			log.Printf("⚠️  Removing unresponsive UI client (send channel full)")
-			go func(c *Client) {
-				h.Unregister <- c
-			}(client)
+			// Discard message to prevent backpressure
+			atomic.AddUint64(&h.droppedPackets, 1)
 		}
 	}
 }
@@ -965,117 +928,42 @@ func MapInfoHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// upgrader configures the WebSocket upgrader
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	// TODO: Enable origin checking in production
-	CheckOrigin: func(r *http.Request) bool {
+// upgrader configures the gws upgrader
+var upgrader = gws.NewUpgrader(&Hub{}, &gws.ServerOption{
+	ReadMaxPayloadSize: 512 * 1024, // 512KB
+	Authorize: func(r *http.Request, session gws.SessionStorage) bool {
 		return true
 	},
-}
+})
 
-// ReadPump reads messages from the WebSocket connection
-// Routes to client's Receive channel → Hub listener → Hub routing
-// Standardized pattern: WS → Receive channel → Hub
-func (c *Client) ReadPump() {
-	defer func() {
-		if !c.isHealthy {
-			log.Printf("🔴 ReadPump: Connection marked unhealthy, initiating cleanup for %s", c.getClientIdentifier())
-		}
-		c.Conn.Close()
-	}()
-
-	c.Conn.SetReadLimit(512 * 1024) // 512KB max message size
-	c.Conn.SetReadDeadline(time.Now().Add(ServerReadDeadline))
-	c.Conn.SetPongHandler(func(string) error {
-		// Update health status on successful pong
-		c.lastPingTime = time.Now()
-		c.missedPings = 0
-		c.isHealthy = true
-		c.Conn.SetReadDeadline(time.Now().Add(ServerReadDeadline))
-		return nil
-	})
-
-	for {
-		_, message, err := c.Conn.ReadMessage()
-		if err != nil {
-			// Determine the type of error
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure) {
-				log.Printf("❌ WebSocket error for %s: %v", c.getClientIdentifier(), err)
-			} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				log.Printf("⏱️  Read timeout for %s - connection may be stale", c.getClientIdentifier())
-			} else {
-				log.Printf("📴 Connection closed for %s: %v", c.getClientIdentifier(), err)
-			}
-			// Mark as unhealthy before breaking
-			c.isHealthy = false
-			break
-		}
-
-		// Update health status on any message received
-		c.lastPingTime = time.Now()
-		c.missedPings = 0
-		c.isHealthy = true
-
-		// Write to client's receive channel - hub listener will pick it up
-		// This is the key queue-based routing: WS → Receive → Hub
-		select {
-		case c.Receive <- message:
-			// Message queued for hub to process
-		default:
-			log.Printf("⚠️  Receive channel full for %s, dropping message", c.getClientIdentifier())
-		}
-	}
-}
-
-// WritePump writes messages from the Send channel to the WebSocket connection
-// Includes ping/pong handling and graceful shutdown
-// Thread-safe: uses channel as message queue - WritePump is the only writer
-// Standardized pattern: Hub → Send channel → WS
+// WritePump writes messages from the Send channel to the gws connection
+// Includes ping handling and graceful shutdown
 func (c *Client) WritePump() {
-	// Create ticker for periodic pings
 	ticker := time.NewTicker(ServerPingInterval)
 	defer func() {
 		ticker.Stop()
-		// Ensure connection is closed properly
-		if c.Conn != nil {
-			c.Conn.Close()
-		}
+		c.Conn.NetConn().Close()
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.Send:
-			// Channel acts as message queue - WritePump serializes all writes
-			c.Conn.SetWriteDeadline(time.Now().Add(ServerWriteDeadline))
 			if !ok {
-				// Hub closed the channel - send close message and return gracefully
-				log.Printf("📤 WritePump: Send channel closed for %s", c.getClientIdentifier())
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.Conn.WriteMessage(gws.OpcodeCloseConnection, nil)
 				return
 			}
-
-			// Write text message (no mutex needed - WritePump is sole writer)
-			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				log.Printf("❌ Write error for %s: %v", c.getClientIdentifier(), err)
-				c.isHealthy = false
+			// Optimized write
+			if err := c.Conn.WriteMessage(gws.OpcodeText, message); err != nil {
 				return
 			}
 
 		case <-ticker.C:
 			// Send ping to keep connection alive
-			c.Conn.SetWriteDeadline(time.Now().Add(ServerWriteDeadline))
-			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("⚠️  Ping failed for %s: %v", c.getClientIdentifier(), err)
-				c.isHealthy = false
+			if err := c.Conn.WritePing(nil); err != nil {
 				return
 			}
-			log.Printf("📶 Ping sent to %s", c.getClientIdentifier())
 
 		case <-c.quit:
-			// Received quit signal
-			log.Printf("📤 WritePump: Received quit signal for %s", c.getClientIdentifier())
 			return
 		}
 	}
@@ -1090,15 +978,7 @@ func (c *Client) getClientIdentifier() string {
 }
 
 // ServeWs upgrades the HTTP connection to WebSocket and registers the client
-// Uses queue-based architecture: client sends to Receive channel, receives via Send channel
 func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string) {
-	// Upgrade HTTP to WebSocket
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println("WebSocket upgrade error:", err)
-		return
-	}
-
 	// Extract drone ID if this is a drone client
 	droneID := ""
 	if clientType == DroneClient {
@@ -1108,8 +988,16 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 		}
 	}
 
-	// Create new client with channels (queue-based architecture)
-	// Note: Channels are initialized in registerClient to ensure proper setup
+	// Upgrade HTTP to WebSocket using gws
+	conn, err := gws.NewUpgrader(hub, &gws.ServerOption{
+		ReadMaxPayloadSize: 512 * 1024, // 512KB
+		Authorize:          func(r *http.Request, session gws.SessionStorage) bool { return true },
+	}).Upgrade(w, r)
+	if err != nil {
+		log.Printf("WebSocket upgrade error: %v", err)
+		return
+	}
+
 	client := &Client{
 		Hub:        hub,
 		Conn:       conn,
@@ -1118,21 +1006,17 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 		quit:       make(chan struct{}),
 	}
 
-	// Register client with hub via channel (queue-based)
+	// Store client in session for OnMessage/OnClose
+	conn.Session().Store("client", client)
+
+	// Register client with hub
 	hub.Register <- client
 
-	// Start read and write pumps in separate goroutines
-	// WritePump: reads from Send channel → writes to WebSocket
-	// ReadPump: reads from WebSocket → writes to Receive channel
+	// Start write pump
 	go client.WritePump()
-	go client.ReadPump()
 
-	// Send initial connection response with grid snapshot and Command Base coordinates
-	// Note: The frontend maps: backend Y -> Three.js Z (ground), backend Z -> Three.js Y (altitude)
-	// Command Base is at Three.js [0, 0.1, 40], so backend should send Y=40 (ground), Z=10 (altitude)
-	// Merge building footprint cells with rubble blocked areas
+	// Send initial connection response
 	allBlocked := GetBuildingBlockedCells()
-
 	initialResponse := InitConnectionResponse{
 		Type:      MessageTypeInitConnection,
 		DroneID:   droneID,
@@ -1143,17 +1027,15 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 			Blocked:   allBlocked,
 			CommandBase: &CommandBase{
 				X: BaseX,
-				Y: 40.0,
+				Y: BaseY,
 			},
 		},
 		Position: Position{
 			X: BaseX,
-			Y: 40.0,
+			Y: BaseY,
 			Z: 10.0,
 		},
 		Survivors: func() []Survivor {
-			// Send all survivors as UNDETECTED so frontend shows them dim.
-			// They light up (DETECTED) when the drone's thermal scan finds them.
 			SurvivorsMutex.RLock()
 			defer SurvivorsMutex.RUnlock()
 			list := make([]Survivor, len(Survivors))
@@ -1166,19 +1048,13 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 		Buildings: Buildings,
 	}
 
-	responseJSON, err := json.Marshal(initialResponse)
-	if err == nil {
+	if responseJSON, err := json.Marshal(initialResponse); err == nil {
 		select {
 		case client.Send <- responseJSON:
-			log.Printf("📤 Sent init_connection to %s: %d survivors, %d buildings",
-				client.getClientIdentifier(), len(GetSurvivors()), len(Buildings))
 		default:
-			log.Printf("Failed to send initial connection to client")
 		}
 	}
 
-	// Drone clients use "intention" field (MH's map_client convention).
-	// Send a separate grid_snapshot so A* pathfinding gets building blocked cells.
 	if clientType == DroneClient {
 		droneGrid := map[string]interface{}{
 			"intention": "grid_snapshot",
@@ -1188,12 +1064,13 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 		if droneGridJSON, err2 := json.Marshal(droneGrid); err2 == nil {
 			select {
 			case client.Send <- droneGridJSON:
-				log.Printf("📤 Sent grid_snapshot (intention) to drone %s: %d blocked cell(s)", droneID, len(allBlocked))
 			default:
-				log.Printf("Failed to send grid_snapshot to drone %s", droneID)
 			}
 		}
 	}
+
+	// Block here and read from connection
+	conn.ReadLoop()
 }
 
 // generateDroneID generates a unique drone ID

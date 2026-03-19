@@ -61,7 +61,6 @@ export interface Building {
 
 /** Grid snapshot containing all blocked areas */
 export interface GridSnapshot {
-  timestamp: number;
   blocked: BlockedArea[];
   command_base?: {
     x: number;
@@ -404,7 +403,6 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
     
     case 'grid_snapshot': {
       const data = message as unknown as {
-        type: string;
         timestamp: number;
         blocked: BlockedArea[];
         command_base?: {
@@ -431,8 +429,12 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
     }
     
     case 'grid_update': {
-      // Handle incremental grid updates if needed
-      console.log('Grid update received:', message);
+      const data = message as unknown as {
+        timestamp: number;
+        updates: Array<{ x: number; y: number; passable: boolean }>;
+      };
+      
+      console.log('Grid update received:', data);
       break;
     }
 
@@ -497,7 +499,6 @@ const initialState = {
 };
 
 export const useStore = create<DroneStore>((set) => ({
-  // Initial state
   ...initialState,
   
   // Actions

@@ -33,28 +33,28 @@ type Position struct {
 
 // Capabilities represents the drone's sensor capabilities
 type Capabilities struct {
-	FOV        int `json:"fov"`
-	ScanRadius int `json:"scan_radius"`
+	FOV        float64 `json:"fov"`
+	ScanRadius float64 `json:"scan_radius"`
 }
 
 // SendPosition represents a position update message sent by a drone
 type SendPosition struct {
-	Type      string     `json:"type"`
-	DroneID   string     `json:"drone_id"`
-	Timestamp int64      `json:"timestamp"`
-	X         float64    `json:"x"`
-	Y         float64    `json:"y"`
-	Z         float64    `json:"z"`
-	Spherical Spherical  `json:"spherical"`
-	ETAMS     int        `json:"eta_ms"`
+	Type           string     `json:"type"`
+	DroneID        string     `json:"drone_id"`
+	Timestamp      int64      `json:"timestamp"`
+	X              float64    `json:"x"`
+	Y              float64    `json:"y"`
+	Z              float64    `json:"z"`
+	Spherical      Spherical  `json:"spherical"`
+	ETAMS          int        `json:"eta_ms"`
 }
 
 // Spherical represents spherical coordinate data from drone sensors
 type Spherical struct {
 	Azimuth    float64 `json:"azimuth"`
 	Elevation  float64 `json:"elevation"`
-	ScanRadius int     `json:"scan_radius"`
-	FOV        int     `json:"fov"`
+	ScanRadius float64 `json:"scan_radius"`
+	FOV        float64 `json:"fov"`
 }
 
 // SurvivorDetected represents a survivor detection event from a drone
@@ -74,10 +74,10 @@ type SurvivorDetected struct {
 
 // GridSnapshot represents a complete grid state broadcast to all connected clients
 type GridSnapshot struct {
-	Type        string         `json:"type"`
-	Timestamp   int64          `json:"timestamp"`
-	Blocked     []BlockedArea  `json:"blocked"`
-	CommandBase *CommandBase   `json:"command_base,omitempty"`
+	Type           string         `json:"type"`
+	Timestamp      int64          `json:"timestamp"`
+	Blocked        []BlockedArea  `json:"blocked"`
+	CommandBase    *CommandBase   `json:"command_base,omitempty"`
 }
 
 // CommandBase represents the Command Base coordinates where drones spawn
@@ -95,8 +95,8 @@ type BlockedArea struct {
 
 // GridUpdate represents an incremental grid state update
 type GridUpdate struct {
-	Timestamp int64      `json:"timestamp"`
-	Updates   []GridCell `json:"updates"`
+	Timestamp      int64      `json:"timestamp"`
+	Updates        []GridCell `json:"updates"`
 }
 
 // GridCell represents a single grid cell's passability state

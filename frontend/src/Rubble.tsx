@@ -11,10 +11,6 @@ function seededRandom(seed: number): () => number {
   };
 }
 
-// Color palettes for different debris types
-const CONCRETE_COLORS = ['#808080', '#707070', '#909090', '#606060', '#a0a0a0', '#757575'];
-const RUST_COLORS = ['#8b4513', '#a0522d', '#704214', '#8b5a2b', '#6b4423'];
-
 /**
  * Generate procedural noise texture for roughness variation
  */
