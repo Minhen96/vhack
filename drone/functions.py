@@ -28,6 +28,7 @@ from drone.models.results import (
     ReturnResult,
     ScanArea,
     ScanResult,
+    SearchResult,
     StatusResult,
     SurvivorSignal,
 )
@@ -367,6 +368,113 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
         raw_readings=raw_readings,
         scan_area=ScanArea(cx=drone.x, cy=drone.y, r=radius),
         battery_remaining_pct=drone.battery,
+    )
+
+
+def _snake_waypoints(
+    x1: int, y1: int, x2: int, y2: int, step: int
+) -> list[tuple[int, int]]:
+    """Generate boustrophedon (snake) scan waypoints over a rectangular area."""
+    lx, hx = min(x1, x2), max(x1, x2)
+    ly, hy = min(y1, y2), max(y1, y2)
+    xs = list(range(lx, hx + 1, step))
+    ys = list(range(ly, hy + 1, step))
+    waypoints: list[tuple[int, int]] = []
+    for i, y in enumerate(ys):
+        row = xs if i % 2 == 0 else list(reversed(xs))
+        for x in row:
+            waypoints.append((x, y))
+    return waypoints
+
+
+async def search_area(
+    drone: Drone,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    z: int = 15,
+    step: int = 10,
+    scan_radius: int = SCAN_RADIUS_DEFAULT,
+    on_waypoint: Callable[[Drone, int], Awaitable[None]] | None = None,
+    on_scan_complete: Callable[[Drone, ScanResult], Awaitable[None]] | None = None,
+) -> SearchResult:
+    """Autonomously sweep a rectangular area in a snake pattern, scanning at each waypoint.
+
+    The drone moves and scans continuously — no LLM inference between each step.
+    Battery is monitored: aborts immediately if battery drops below critical threshold.
+
+    Returns aggregated detections and raw heatmap readings from the full sweep.
+    """
+    if not drone.has_capability("thermal_scan"):
+        return SearchResult(
+            drone_id=drone.id,
+            waypoints_visited=0,
+            waypoints_total=0,
+            survivors_detected=False,
+            detections=[],
+            battery_remaining_pct=drone.battery,
+            aborted=True,
+            abort_reason=f"Drone type '{drone.type.value}' does not support thermal scanning.",
+        )
+
+    waypoints = _snake_waypoints(x1, y1, x2, y2, step)
+    all_temps: dict[tuple[int, int], float] = {}
+    all_detections: dict[tuple[int, int], SurvivorSignal] = {}
+    visited = 0
+
+    for wx, wy in waypoints:
+        if drone.battery_critical:
+            logger.warning("search_area: aborting — battery critical (%.1f%%)", drone.battery)
+            break
+
+        # Move to waypoint — streams position updates via on_waypoint
+        move_result = await move_to(drone, wx, wy, z, on_waypoint=on_waypoint)
+        if not move_result.success:
+            logger.warning("search_area: blocked at (%d,%d), skipping waypoint", wx, wy)
+            continue
+
+        if drone.battery_critical:
+            break
+
+        # Scan at this waypoint
+        scan_result = await thermal_scan(drone, scan_radius)
+        visited += 1
+
+        # Merge raw readings (keep highest temp per cell)
+        for r in scan_result.raw_readings:
+            key = (int(round(r["x"])), int(round(r["y"])))
+            all_temps[key] = max(all_temps.get(key, 0.0), r.get("temp_celsius", 0.0))
+
+        # Merge detections (keep highest confidence per cell)
+        for sig in scan_result.detections:
+            key = (sig.x, sig.y)
+            if key not in all_detections or sig.confidence > all_detections[key].confidence:
+                all_detections[key] = sig
+
+        if on_scan_complete:
+            await on_scan_complete(drone, scan_result)
+
+    aborted = visited < len(waypoints)
+    merged_raw = [
+        {"x": x, "y": y, "temp_celsius": round(temp, 1)}
+        for (x, y), temp in all_temps.items()
+    ]
+
+    logger.info(
+        "search_area: %s visited %d/%d waypoints, found %d survivor(s), battery=%.1f%%",
+        drone.id, visited, len(waypoints), len(all_detections), drone.battery,
+    )
+    return SearchResult(
+        drone_id=drone.id,
+        waypoints_visited=visited,
+        waypoints_total=len(waypoints),
+        survivors_detected=len(all_detections) > 0,
+        detections=list(all_detections.values()),
+        raw_readings=merged_raw,
+        battery_remaining_pct=drone.battery,
+        aborted=aborted,
+        abort_reason="Battery critical." if aborted else None,
     )
 
 

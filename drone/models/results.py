@@ -76,3 +76,15 @@ class ReturnResult(BaseModel):
     battery_pct: float
     message: str
     eta_seconds: int
+
+
+class SearchResult(BaseModel):
+    drone_id: str
+    waypoints_visited: int
+    waypoints_total: int
+    survivors_detected: bool
+    detections: list[SurvivorSignal]       # all unique detections across all scan points
+    raw_readings: list[dict] = []          # merged heatmap data from every scan point
+    battery_remaining_pct: float
+    aborted: bool                          # True if battery went critical mid-search
+    abort_reason: str | None = None

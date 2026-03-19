@@ -115,6 +115,9 @@ func runServer() {
 	// Thermal scan endpoint — drone calls this instead of random generation
 	mux.HandleFunc("/scan", ScanHandler)
 
+	// Map info endpoint — returns searchable coordinate bounds for the LLM agent
+	mux.HandleFunc("/map-info", MapInfoHandler)
+
 	// Configure server with timeouts
 	server := &http.Server{
 		Addr:           ":" + port,

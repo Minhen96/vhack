@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from drone.api.schemas import DeliverRequest, MoveRequest, ScanRequest
+from drone.api.schemas import DeliverRequest, MoveRequest, ScanRequest, SearchRequest
 from drone.core.map_client import map_client
 from drone.functions import (
     deliver_aid,
@@ -14,6 +14,7 @@ from drone.functions import (
     move_to,
     passive_waypoint_scan,
     return_to_base,
+    search_area,
     thermal_scan,
 )
 from drone.models.results import (
@@ -22,6 +23,7 @@ from drone.models.results import (
     MoveResult,
     ReturnResult,
     ScanResult,
+    SearchResult,
     StatusResult,
 )
 from drone.models.drone import Drone
@@ -44,12 +46,15 @@ async def move(drone_id: str, body: MoveRequest) -> MoveResult:
     drone = _lookup(drone_id)
 
     # on_waypoint is called inside move_to after each single-cell step.
-    # Pushing position here (not at the end) gives map engine a stream of updates
-    # so the drone appears to move smoothly across the map in real-time.
+    # sleep(0.1) paces position updates to ~10/s so the frontend lerp
+    # animation has time to render each step rather than teleporting.
+    # It also spaces out passive_waypoint_scan HTTP calls so the sim
+    # server isn't flooded with dozens of concurrent requests.
     async def on_waypoint(d: Drone, step_dist: int) -> None:
         await map_client.send_position(d, step_dist)
         await map_client.send_drone_status(d)
         asyncio.create_task(passive_waypoint_scan(d))
+        await asyncio.sleep(0.1)
 
     result = await move_to(drone, body.x, body.y, body.z, on_waypoint=on_waypoint)
     # Final status push — sets drone to IDLE (or confirms blocked position).
@@ -81,6 +86,7 @@ async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
         await map_client.send_position(d, step_dist)
         await map_client.send_drone_status(d)
         asyncio.create_task(passive_waypoint_scan(d))
+        await asyncio.sleep(0.1)
 
     result = await deliver_aid(drone, body.x, body.y, body.z, on_waypoint=on_waypoint)
     # Notify Map Engine: aid delivered at location + final status
@@ -99,6 +105,7 @@ async def recall(drone_id: str) -> ReturnResult:
         await map_client.send_position(d, step_dist)
         await map_client.send_drone_status(d)
         asyncio.create_task(passive_waypoint_scan(d))
+        await asyncio.sleep(0.1)
 
     # Push live battery updates every second while charging so Map Engine
     # sees the battery rising in real-time without needing to poll
@@ -107,6 +114,34 @@ async def recall(drone_id: str) -> ReturnResult:
 
     result = await return_to_base(drone, on_waypoint=on_waypoint, on_tick=on_tick)
     # Final status push — charging or blocked
+    await map_client.send_drone_status(drone)
+    return result
+
+
+@router.post("/{drone_id}/search", response_model=SearchResult)
+async def search(drone_id: str, body: SearchRequest) -> SearchResult:
+    drone = _lookup(drone_id)
+
+    async def on_waypoint(d: Drone, step_dist: int) -> None:
+        await map_client.send_position(d, step_dist)
+        await map_client.send_drone_status(d)
+        asyncio.create_task(passive_waypoint_scan(d))
+        await asyncio.sleep(0.1)
+
+    async def on_scan_complete(d: Drone, scan_result: ScanResult) -> None:
+        if scan_result.raw_readings:
+            await map_client.send_scan_heatmap(d, scan_result.raw_readings)
+        for signal in scan_result.detections:
+            await map_client.send_survivor_detected(d, signal.x, signal.y, d.z, signal.confidence)
+        await map_client.send_drone_status(d)
+
+    result = await search_area(
+        drone,
+        body.x1, body.y1, body.x2, body.y2,
+        body.z, body.step, body.scan_radius,
+        on_waypoint=on_waypoint,
+        on_scan_complete=on_scan_complete,
+    )
     await map_client.send_drone_status(drone)
     return result
 

@@ -12,6 +12,8 @@ Or mount into an existing ASGI app:
     app.mount("/mcp", mcp.streamable_http_app())
 """
 
+import os
+
 import httpx
 from mcp.server.fastmcp import FastMCP
 
@@ -22,8 +24,10 @@ mcp = FastMCP(
     instructions=(
         "You are the MCP interface for a rescue drone fleet operating in an earthquake disaster zone. "
         "Always call list_active_drones first to discover the fleet. "
+        "Use search_area (not repeated move_to + thermal_scan) to cover ground — it sweeps a rectangle autonomously with no gaps. "
+        "Divide the map into sectors and assign one search_area call per sector. "
         "Monitor battery levels — when a drone drops below 20%, call request_backup immediately. "
-        "Prioritise thermal_scan for survivor detection and delivery_aid for confirmed survivors."
+        "After search_area returns detections, use delivery_aid to send aid to each confirmed survivor coordinate."
     ),
 )
 
@@ -227,7 +231,73 @@ async def delivery_aid(drone_id: str, x: int, y: int, z: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# 9. request_backup  (battery-low rescue handoff)
+# 9. get_map_info  (discover map boundaries from sim server)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def get_map_info() -> dict:
+    """
+    Query the simulation server for the real map boundaries and base position.
+
+    Returns x_min, x_max, y_min, y_max — use these as bounds for search_area
+    calls instead of hard-coded values. Always call this before planning sectors.
+    """
+    sim_url = os.getenv("SIM_SERVER_URL", "http://localhost:8080")
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{sim_url}/map-info", timeout=3.0)
+            return resp.json()
+        except Exception as e:
+            return {"x_min": -40, "x_max": 40, "y_min": -40, "y_max": 40, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# 10. search_area  (autonomous snake-pattern sweep)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def search_area(
+    drone_id: str,
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    z: int = 15,
+    step: int = 10,
+) -> dict:
+    """
+    Autonomously sweep a rectangular area using a snake pattern, scanning at every waypoint.
+
+    The drone moves and scans continuously — NO LLM inference between each step.
+    Use this instead of repeated move_to + thermal_scan calls.
+
+    Args:
+        x1, y1 : top-left corner of the search area
+        x2, y2 : bottom-right corner of the search area
+        z      : flight altitude during search (default 15)
+        step   : grid spacing between scan points (default 10, min 5, max 30)
+
+    Returns aggregated survivor detections and whether the sweep was completed.
+    Battery is monitored — aborts and returns partial results if battery goes critical.
+    """
+    drone = registry.get(drone_id)
+    if not drone:
+        return {"error": f"Drone '{drone_id}' not found."}
+
+    url = f"http://{drone.host}:{drone.port}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{url}/drones/{drone_id}/search",
+            json={"x1": x1, "y1": y1, "x2": x2, "y2": y2, "z": z, "step": step},
+            timeout=600.0,  # full-grid sweep can take several minutes
+        )
+    return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# 10. request_backup  (battery-low rescue handoff)
 # ---------------------------------------------------------------------------
 
 

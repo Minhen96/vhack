@@ -948,6 +948,23 @@ func ScanHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(readings)
 }
 
+// MapInfoHandler handles GET /map-info
+// Returns the searchable coordinate bounds so the LLM agent does not need
+// to hard-code map dimensions in its system prompt.
+func MapInfoHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"x_min":    -40,
+		"x_max":    40,
+		"y_min":    -40,
+		"y_max":    40,
+		"base_x":   BaseX,
+		"base_y":   BaseY,
+		"note":     "Drone coordinates: x horizontal, y horizontal, z altitude. Base is at (0,0).",
+	})
+}
+
 // upgrader configures the WebSocket upgrader
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,

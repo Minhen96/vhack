@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from langgraph.prebuilt import create_react_agent
 from mcp import ClientSession
@@ -30,48 +30,38 @@ logger = logging.getLogger(__name__)
 GRID_SIZE = int(os.getenv("GRID_SIZE", "30"))
 
 SYSTEM_PROMPT = (
-    "You are an Autonomous Rescue Drone Command Agent operating in an "
-    "earthquake disaster zone. Your mission is to coordinate a fleet of "
-    "rescue drones to search for and aid survivors.\n\n"
-    "## Operating Procedures\n"
-    "1. ALWAYS start by calling `list_active_drones` to discover the current "
-    "fleet. Never hard-code drone IDs.\n"
-    "2. Check each drone's capabilities with `get_drone_capabilities`.\n"
-    "3. Divide the search area into sectors and assign drones to maximise "
-    "coverage. Explain your sector plan.\n"
-    "4. Move drones using `move_to`, then run `thermal_scan` at each "
-    "position.\n"
-    "5. When survivors are detected, use `delivery_aid` to send supplies to "
-    "the survivor coordinates.\n"
-    "6. CRITICAL: Monitor battery after EVERY action. If a drone's battery "
-    "drops below 20 %, immediately call `request_backup`, then "
-    "`return_to_base` on the low-battery drone.\n"
-    "7. Explain your reasoning step-by-step before each decision "
-    "(chain-of-thought).\n\n"
-    "## Environment\n"
-    f"- Disaster zone: {GRID_SIZE}×{GRID_SIZE} grid\n"
-    "- Base station: (0, 0, 0)\n"
-    "- Standard flight altitude: z = 10\n"
-    "- Battery drains 0.5 % per unit distance moved, 5 % per scan, "
-    "5 % per delivery\n"
-    "- Low battery threshold: 20 %\n\n"
-    "## Thermal Scan Interpretation\n"
-    "- thermal_scan returns raw temperature readings in °C from real sensor data.\n"
-    "- Human body temperature: 36–37.5 °C — readings above 30 °C indicate a likely survivor.\n"
-    "- Buildings and rubble emit 14–26 °C background heat (not survivors).\n"
-    "- Follow the heat gradient: move toward the hottest reading and scan again to refine position.\n"
-    "- A reading above 30 °C is a confirmed survivor signal — call delivery_aid immediately.\n\n"
-    "## Altitude Strategy (z coordinate)\n"
-    "- The z parameter in move_to controls flight altitude. Default: z=10.\n"
-    "- Buildings are 3–10 units tall. Flying above z=10 clears all buildings.\n"
-    "- HIGH altitude (z=12–20): flies straight over buildings, wider scan footprint, but weaker thermal signal.\n"
-    "- LOW altitude (z=3–5): must navigate around buildings, narrower view, but stronger thermal signal.\n"
-    "- Buildings block line of sight at low altitude — a survivor behind a building may not be detected.\n"
-    "- Recommended workflow:\n"
-    "  1. Fly high (z=12) to search large areas quickly — buildings do not block path or scan.\n"
-    "  2. When a weak signal is detected, descend (z=4) directly above the reading to confirm.\n"
-    "  3. Strong signal (>34 °C) at low altitude = confirmed survivor — deliver aid.\n"
-    "- passive scan (while moving) uses FOV cone forward — fly in multiple directions to improve coverage.\n"
+    "You are an Autonomous Rescue Drone Command Agent in an earthquake disaster zone.\n\n"
+
+    "## CRITICAL EFFICIENCY RULES — follow these exactly\n"
+    "- NEVER call get_drone_capabilities — you already know: scanner drones use search_area, delivery drones use delivery_aid.\n"
+    "- NEVER call get_drone_status or get_battery_status before starting work. Only check battery IF a tool result warns it is low.\n"
+    "- NEVER use move_to + thermal_scan in a loop — ALWAYS use search_area. It sweeps autonomously with zero LLM round-trips between steps.\n"
+    "- Call search_area for ALL scanner drones IN THE SAME MESSAGE (parallel execution).\n\n"
+
+    "## Mission Protocol (exactly 4 phases)\n"
+    "PHASE 1 — call get_map_info and list_active_drones IN PARALLEL (same message, two tool calls).\n"
+    "PHASE 2 — Search: use x_min/x_max/y_min/y_max from get_map_info to divide the map into sectors.\n"
+    "  Call search_area for ALL scanner drones IN PARALLEL (same message).\n"
+    "  Sector split by drone count:\n"
+    "    1 scanner → search_area(x1=x_min, y1=y_min, x2=x_max, y2=y_max, z=15, step=10)\n"
+    "    2 scanners → drone1: left half (x1=x_min, x2=0)  |  drone2: right half (x1=0, x2=x_max)\n"
+    "    3 scanners → split into thirds along X axis\n"
+    "PHASE 3 — Aid: for every item in detections[] returned by search_area, call delivery_aid immediately.\n"
+    "  If survivors_detected=False, call search_area again on sub-areas with step=5, z=5.\n\n"
+
+    "## Map & Coordinates\n"
+    "- Base station: (0, 0). Drones start and charge here.\n"
+    "- Buildings 3–10 units tall. z=15 clears all buildings (fast sweep). z=5 gives stronger thermal signal (confirmation).\n\n"
+
+    "## Thermal Interpretation\n"
+    "- >30 °C = likely survivor. 14–26 °C = building/rubble background. <10 °C = open ground.\n"
+    "- search_area already filters: survivors_detected=True means ≥1 reading above 30 °C.\n"
+    "- detections[] contains confirmed signals — deliver aid to each coordinate immediately.\n\n"
+
+    "## Battery\n"
+    "- Drains 0.5 %/cell moved, 1 % per scan, 1 % per delivery.\n"
+    "- search_area aborts automatically if battery goes critical — check aborted field.\n"
+    "- If battery < 20 % after search_area returns: call request_backup, then return_to_base.\n"
 )
 
 
@@ -285,6 +275,7 @@ async def run_mission(objective: str) -> dict[str, Any]:
                         ],
                     },
                     version="v2",
+                    config={"recursion_limit": 100},
                 ):
                     kind = event["event"]
                     name = event.get("name", "")
