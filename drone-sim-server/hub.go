@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -80,12 +81,12 @@ var (
 
 // Survivor represents a survivor position in the disaster area
 type Survivor struct {
-	ID         string  `json:"id"`
-	X          float64 `json:"x"`
-	Y          float64 `json:"y"`        // Altitude in Three.js (ground = 0)
-	Z          float64 `json:"z"`        // Ground plane coordinate
-	Confidence float64 `json:"confidence"`
-	Status     string  `json:"status"`
+	ID      string  `json:"id"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`       // Altitude in Three.js (ground = 0)
+	Z       float64 `json:"z"`       // Ground plane coordinate
+	Status  string  `json:"status"`
+	Thermal float64 `json:"thermal"` // Body temperature in °C (36–37.5), used by /scan
 }
 
 // Global Survivors - randomly generated on server startup
@@ -113,12 +114,12 @@ func GenerateSurvivors(count int) []Survivor {
 		}
 		
 		survivors[i] = Survivor{
-			ID:         fmt.Sprintf("survivor_%d", i+1),
-			X:          x,
-			Y:          0,    // Ground level (will map to Three.js Y)
-			Z:          z,    // Ground plane (will map to Three.js Z)
-			Confidence: 0.7 + rand.Float64()*0.25, // 0.7 to 0.95
-			Status:     "DETECTED",
+			ID:      fmt.Sprintf("survivor_%d", i+1),
+			X:       x,
+			Y:       0,                           // Ground level (maps to Three.js Y)
+			Z:       z,                           // Ground plane (maps to Three.js Z)
+			Status:  "DETECTED",
+			Thermal: 36.0 + rand.Float64()*1.5,  // 36.0–37.5 °C body temp
 		}
 		
 		log.Printf("🚑 Generated survivor %d at (%.1f, %.1f)", i+1, x, z)
@@ -685,6 +686,76 @@ func (h *Hub) GetInitialGridSnapshot() GridSnapshot {
 // Client Methods - ReadPump and WritePump (Queue-based)
 // =============================================================================
 
+// =============================================================================
+// Scan Handler — GET /scan
+// =============================================================================
+
+// ThermalReading is a single raw thermal data point returned by /scan.
+// The drone interprets temp_celsius: >30°C likely survivor, 14–26°C background.
+type ThermalReading struct {
+	X           float64 `json:"x"`
+	Y           float64 `json:"y"`
+	TempCelsius float64 `json:"temp_celsius"`
+}
+
+// ScanHandler handles GET /scan?x=&y=&z=&radius=
+// Returns raw thermal readings for all objects within the scan radius.
+// Survivors emit 36–37.5 °C; buildings emit 14–18 °C background heat.
+// The drone calls this instead of generating random detections.
+func ScanHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+
+	q := r.URL.Query()
+	droneX, _ := strconv.ParseFloat(q.Get("x"), 64)
+	droneY, _ := strconv.ParseFloat(q.Get("y"), 64)
+	droneZ, _ := strconv.ParseFloat(q.Get("z"), 64)
+	scanRadius, _ := strconv.ParseFloat(q.Get("radius"), 64)
+	if scanRadius <= 0 {
+		scanRadius = 5
+	}
+
+	readings := []ThermalReading{}
+
+	// Survivors — body heat 36–37.5 °C, falls off with distance
+	SurvivorsMutex.RLock()
+	for _, s := range Survivors {
+		dx := s.X - droneX
+		dy := s.Z - droneY // Survivor.Z is ground plane; drone Y is also ground plane
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist <= scanRadius {
+			apparent := s.Thermal * math.Exp(-dist*0.1)
+			noise := (rand.Float64() - 0.5) * 0.4
+			temp := math.Round((apparent+noise)*10) / 10
+			readings = append(readings, ThermalReading{X: s.X, Y: s.Z, TempCelsius: temp})
+		}
+	}
+	SurvivorsMutex.RUnlock()
+
+	// Buildings — cooler background heat 14–18 °C, falls off faster
+	BuildingsMutex.RLock()
+	for _, b := range Buildings {
+		dx := b.X - droneX
+		dy := b.Y - droneY
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist > 0 && dist <= scanRadius {
+			apparent := b.Thermal * math.Exp(-dist*0.3)
+			noise := (rand.Float64() - 0.5) * 0.3
+			temp := math.Round((apparent+noise)*10) / 10
+			readings = append(readings, ThermalReading{X: b.X, Y: b.Y, TempCelsius: temp})
+		}
+	}
+	BuildingsMutex.RUnlock()
+
+	_ = droneZ // altitude penalty reserved for Phase 4
+
+	json.NewEncoder(w).Encode(readings)
+}
+
 // upgrader configures the WebSocket upgrader
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -871,7 +942,7 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 			Y: 40.0,
 			Z: 10.0,
 		},
-		Survivors: GetSurvivors(),
+		Survivors: []Survivor{}, // Survivors are secret — discovered only via /scan thermal readings
 		Buildings: Buildings,
 	}
 

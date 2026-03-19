@@ -53,7 +53,13 @@ SYSTEM_PROMPT = (
     "- Standard flight altitude: z = 10\n"
     "- Battery drains 0.5 % per unit distance moved, 5 % per scan, "
     "5 % per delivery\n"
-    "- Low battery threshold: 20 %\n"
+    "- Low battery threshold: 20 %\n\n"
+    "## Thermal Scan Interpretation\n"
+    "- thermal_scan returns raw temperature readings in °C from real sensor data.\n"
+    "- Human body temperature: 36–37.5 °C — readings above 30 °C indicate a likely survivor.\n"
+    "- Buildings and rubble emit 14–26 °C background heat (not survivors).\n"
+    "- Follow the heat gradient: move toward the hottest reading and scan again to refine position.\n"
+    "- A reading above 30 °C is a confirmed survivor signal — call delivery_aid immediately.\n"
 )
 
 

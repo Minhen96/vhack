@@ -19,10 +19,11 @@ def _now_ms() -> int:
 
 
 class MapEngineClient:
-    """Persistent WebSocket connection to Map Engine.
+    """Persistent WebSocket connection to Map Engine (sim server).
 
-    All messages share the same envelope:
-        { "intention": "<type>", "drone_id": "...", "timestamp": <ms>, ...payload }
+    Message field conventions:
+      Outbound (drone → sim server): use "type" field — matches what hub and UI expect.
+      Inbound  (sim server → drone): use "intention" field — read in _receive_loop.
 
     Call connect() once on startup, then use send_* methods after each state change.
     """
@@ -207,17 +208,17 @@ class MapEngineClient:
         # Store drone ref so the reconnect loop can re-announce without needing it passed in
         self._drone = drone
         await self._send({
-            "intention": "init_connection",
+            "type": "init_connection",
             "drone_id": drone.id,
             "timestamp": _now_ms(),
-            "type": drone.type.value,
+            "drone_type": drone.type.value,
             "capabilities": drone.capabilities,
             "position": drone.position,
         })
 
     async def send_position(self, drone: Drone, distance: int = 0) -> None:
         await self._send({
-            "intention": "send_position",
+            "type": "send_position",
             "drone_id": drone.id,
             "timestamp": _now_ms(),
             "x": drone.x,
@@ -229,7 +230,7 @@ class MapEngineClient:
 
     async def send_drone_status(self, drone: Drone) -> None:
         await self._send({
-            "intention": "send_drone_status",
+            "type": "send_drone_status",
             "drone_id": drone.id,
             "timestamp": _now_ms(),
             "status": drone.status.value,
@@ -240,7 +241,7 @@ class MapEngineClient:
         self, drone: Drone, x: int, y: int, z: int, confidence: float
     ) -> None:
         await self._send({
-            "intention": "survivor_detected",
+            "type": "survivor_detected",
             "drone_id": drone.id,
             "timestamp": _now_ms(),
             "x": x,
@@ -251,7 +252,7 @@ class MapEngineClient:
 
     async def send_aid_delivered(self, drone: Drone, x: int, y: int, z: int) -> None:
         await self._send({
-            "intention": "aid_delivered",
+            "type": "aid_delivered",
             "drone_id": drone.id,
             "timestamp": _now_ms(),
             "x": x,

@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import random
 from collections.abc import Awaitable, Callable
+
+import httpx
 
 from drone.constants import (
     BASE_X,
@@ -17,6 +18,7 @@ from drone.constants import (
     BATTERY_LOW_THRESHOLD,
     SCAN_RADIUS_DEFAULT,
 )
+from drone.core.config import SIM_SERVER_URL
 from drone.models.drone import Drone, DroneStatus
 from drone.models.results import (
     BatteryResult,
@@ -224,20 +226,29 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
     drone.status = DroneStatus.SCANNING
     _drain(drone, BATTERY_DRAIN_SCAN)
 
-    # TODO: replace with real grid data from Map Engine once the
-    # GET /grid/passability (or equivalent) endpoint is available.
-    # For now, simulate a 10% chance of a survivor signal per cell in radius.
+    # Query sim server for real thermal readings around the drone's position.
+    # Sim server returns raw °C values for survivors (36–37.5°C) and buildings (14–18°C).
+    # Any reading above 30°C is interpreted as a likely human heat signature.
     detections: list[SurvivorSignal] = []
-    for dy in range(-radius, radius + 1):
-        for dx in range(-radius, radius + 1):
-            if dx * dx + dy * dy > radius * radius:
-                continue  # outside circular scan area
-            nx, ny = drone.x + dx, drone.y + dy
-            if nx < 0 or ny < 0:
-                continue  # outside grid bounds
-            if random.random() < 0.1:
-                confidence = round(random.uniform(0.7, 1.0), 3)
-                detections.append(SurvivorSignal(x=nx, y=ny, confidence=confidence))
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SIM_SERVER_URL}/scan",
+                params={"x": drone.x, "y": drone.y, "z": drone.z, "radius": radius},
+                timeout=5.0,
+            )
+        readings = resp.json()
+        detections = [
+            SurvivorSignal(
+                x=int(round(r["x"])),
+                y=int(round(r["y"])),
+                confidence=round(min(r["temp_celsius"] / 37.5, 1.0), 3),
+            )
+            for r in readings
+            if 30 < r.get("temp_celsius", 0) < 42  # human range: 30–42°C (>42 = fire/equipment)
+        ]
+    except Exception:
+        logger.exception("thermal_scan: failed to reach sim server at %s", SIM_SERVER_URL)
 
     drone.status = DroneStatus.IDLE
 

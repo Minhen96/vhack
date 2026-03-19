@@ -459,13 +459,12 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         timestamp: number;
       };
       
-      // Backend Z (altitude) maps to Three.js Y
       const survivor: Survivor = {
         id: `survivor_${data.timestamp}_${data.drone_id}`,
         position: {
           x: data.x,
-          y: data.z, // Z (altitude) from backend → Y in Three.js
-          z: data.y, // Y from backend → Z in Three.js
+          y: 0.3,   // fixed ground offset so survivor model sits on terrain
+          z: data.y, // grid Y (ground plane) → Three.js Z
         },
         confidence: data.confidence,
         status: data.status || 'DETECTED',
@@ -529,37 +528,13 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
       const initData = message as unknown as {
         type: string;
         timestamp: number;
-        survivors?: Array<{
-          id: string;
-          x: number;
-          y: number;
-          z: number;
-          confidence: number;
-          status: string;
-        }>;
         buildings?: Building[];
       };
 
-      // Process survivors — server: {x, y=altitude(0), z=ground_z}
-      // Three.js: x=x, y=ground_height(0.3), z=ground_z
-      if (initData.survivors && initData.survivors.length > 0) {
-        const survivors: Survivor[] = initData.survivors.map((s) => ({
-          id: s.id,
-          position: {
-            x: s.x,
-            y: 0.3,  // fixed ground level with small offset so model sits on ground
-            z: s.z,  // ground plane Z coordinate
-          },
-          confidence: s.confidence,
-          status: (s.status as SurvivorStatus) || 'DETECTED',
-          thermalSignature: true,
-          timestamp: initData.timestamp,
-          detected_by: 'server',
-        }));
-        useStore.getState().setSurvivors(survivors);
-      }
+      // Survivors are NOT loaded here — they are secret until the drone scans and
+      // sends survivor_detected messages. This creates the realistic discovery flow.
 
-      // Process buildings
+      // Process buildings — rendered as 3D box obstacles
       if (initData.buildings && initData.buildings.length > 0) {
         useStore.getState().setBuildings(initData.buildings);
       }

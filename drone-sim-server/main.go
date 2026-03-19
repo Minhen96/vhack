@@ -110,6 +110,9 @@ func runServer() {
 	// Health check endpoint
 	mux.HandleFunc("/health", healthHandler)
 
+	// Thermal scan endpoint — drone calls this instead of random generation
+	mux.HandleFunc("/scan", ScanHandler)
+
 	// Configure server with timeouts
 	server := &http.Server{
 		Addr:           ":" + port,
