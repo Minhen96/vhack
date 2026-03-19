@@ -12,13 +12,10 @@ Or mount into an existing ASGI app:
     app.mount("/mcp", mcp.streamable_http_app())
 """
 
-import math
-import random
-
+import httpx
 from mcp.server.fastmcp import FastMCP
 
-from backend.core.drone_registry import BATTERY_LOW_THRESHOLD, registry
-from backend.models.drone import DroneCapability, DroneStatus
+from backend.core.drone_registry import registry
 
 mcp = FastMCP(
     name="rescue-drone-mcp",
@@ -37,25 +34,25 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def list_active_drones() -> list[dict]:
+async def list_active_drones() -> list[dict]:
     """
-    Discover all currently active (non-offline) drones on the network.
+    Discover all currently active drones on the network.
 
-    Returns each drone's position (x, y, z), battery percentage, and status.
+    Calls each registered drone's /status endpoint and returns live state.
     Always call this first — drone IDs must never be hard-coded.
     """
-    return [
-        {
-            "drone_id": d.drone_id,
-            "x": d.x,
-            "y": d.y,
-            "z": d.z,
-            "battery_pct": d.battery_pct,
-            "status": d.status.value,
-        }
-        for d in registry.get_all()
-        if d.status != DroneStatus.OFFLINE
-    ]
+    results = []
+    async with httpx.AsyncClient() as client:
+        for d in registry.get_all():
+            if not d.host:
+                continue
+            url = f"http://{d.host}:{d.port}"
+            try:
+                resp = await client.get(f"{url}/drones/{d.drone_id}/status", timeout=3.0)
+                results.append(resp.json())
+            except Exception:
+                pass
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +61,7 @@ def list_active_drones() -> list[dict]:
 
 
 @mcp.tool()
-def get_drone_capabilities(drone_id: str) -> dict:
+async def get_drone_capabilities(drone_id: str) -> dict:
     """
     Return the capability list for a specific drone.
 
@@ -76,22 +73,7 @@ def get_drone_capabilities(drone_id: str) -> dict:
     if not drone:
         return {"error": f"Drone '{drone_id}' not found."}
 
-    capability_descriptions = {
-        DroneCapability.THERMAL_SCAN: (
-            "Detects infrared radiation to identify heat signatures of survivors buried under rubble."
-        ),
-        DroneCapability.DELIVERY_AID: (
-            "Carries and drops medical supplies, food, or rescue equipment to target coordinates."
-        ),
-    }
-
-    return {
-        "drone_id": drone_id,
-        "capabilities": [
-            {"name": c.value, "description": capability_descriptions[c]}
-            for c in drone.capabilities
-        ],
-    }
+    return {"drone_id": drone_id, "capabilities": [c.value for c in drone.capabilities]}
 
 
 # ---------------------------------------------------------------------------
@@ -100,21 +82,20 @@ def get_drone_capabilities(drone_id: str) -> dict:
 
 
 @mcp.tool()
-def get_drone_status(drone_id: str) -> dict:
+async def get_drone_status(drone_id: str) -> dict:
     """
     Return the current operational status of a drone.
 
-    Possible values: idle, busy, returning, charging, offline.
+    Includes position and battery — useful context for the agent.
     """
     drone = registry.get(drone_id)
     if not drone:
         return {"error": f"Drone '{drone_id}' not found."}
 
-    return {
-        "drone_id": drone_id,
-        "status": drone.status.value,
-        "current_task": drone.current_task,
-    }
+    url = f"http://{drone.host}:{drone.port}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{url}/drones/{drone_id}/status", timeout=3.0)
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -123,23 +104,21 @@ def get_drone_status(drone_id: str) -> dict:
 
 
 @mcp.tool()
-def get_battery_status(drone_id: str) -> dict:
+async def get_battery_status(drone_id: str) -> dict:
     """
     Return the battery percentage for a specific drone.
 
-    When battery_pct is below the low threshold (20%), the agent should
-    immediately call request_backup to dispatch a replacement drone.
+    When battery is below 20%, call request_backup immediately.
+    Battery charges gradually at 5%/s — poll this to track charging progress.
     """
     drone = registry.get(drone_id)
     if not drone:
         return {"error": f"Drone '{drone_id}' not found."}
 
-    return {
-        "drone_id": drone_id,
-        "battery_pct": round(drone.battery_pct, 1),
-        "is_low": drone.battery_pct < BATTERY_LOW_THRESHOLD,
-        "low_threshold_pct": BATTERY_LOW_THRESHOLD,
-    }
+    url = f"http://{drone.host}:{drone.port}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{url}/drones/{drone_id}/battery", timeout=3.0)
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -148,47 +127,26 @@ def get_battery_status(drone_id: str) -> dict:
 
 
 @mcp.tool()
-def move_to(drone_id: str, x: int, y: int, z: int) -> dict:
+async def move_to(drone_id: str, x: int, y: int, z: int) -> dict:
     """
     Move a drone to the given coordinates (x, y, z).
 
-    Battery cost is proportional to distance (0.5 % per unit).
-    If battery drops below the low threshold after moving, the response
-    includes a backup_drone_available field — call request_backup immediately.
+    Returns the new position and remaining battery.
+    If status is 'blocked', A* found no path or battery is critical —
+    call request_backup immediately.
     """
     drone = registry.get(drone_id)
     if not drone:
         return {"error": f"Drone '{drone_id}' not found."}
-    if drone.status == DroneStatus.OFFLINE:
-        return {"error": f"Drone '{drone_id}' is offline and cannot move."}
 
-    distance = math.sqrt((x - drone.x) ** 2 + (y - drone.y) ** 2 + (z - drone.z) ** 2)
-    battery_cost = round(distance * 0.5, 2)
-
-    drone.x = x
-    drone.y = y
-    drone.z = z
-    drone.battery_pct = max(0.0, drone.battery_pct - battery_cost)
-    drone.status = DroneStatus.BUSY
-    drone.current_task = f"moved to ({x},{y},{z})"
-    registry.update(drone)
-
-    result: dict = {
-        "drone_id": drone_id,
-        "success": True,
-        "new_position": {"x": x, "y": y, "z": z},
-        "battery_remaining_pct": round(drone.battery_pct, 1),
-    }
-
-    if drone.battery_pct < BATTERY_LOW_THRESHOLD:
-        backup = registry.find_nearest_idle(x, y, z, exclude_id=drone_id)
-        result["battery_warning"] = (
-            f"Battery critically low at {round(drone.battery_pct, 1)}%. "
-            "Call request_backup now."
+    url = f"http://{drone.host}:{drone.port}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{url}/drones/{drone_id}/move",
+            json={"x": x, "y": y, "z": z},
+            timeout=10.0,
         )
-        result["backup_drone_available"] = backup.drone_id if backup else None
-
-    return result
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -197,52 +155,25 @@ def move_to(drone_id: str, x: int, y: int, z: int) -> dict:
 
 
 @mcp.tool()
-def thermal_scan(drone_id: str) -> dict:
+async def thermal_scan(drone_id: str, radius: int = 3) -> dict:
     """
     Perform an infrared thermal scan at the drone's current position.
 
-    Detects heat signatures (survivors, body heat) by sensing surface
-    temperature variations caused by infrared radiation.  Each detected
-    signature includes coordinates, temperature, and a confidence score.
-
+    Detects heat signatures (survivors) within the given radius (default 3).
     Battery cost: 5 % per scan.
     """
     drone = registry.get(drone_id)
     if not drone:
         return {"error": f"Drone '{drone_id}' not found."}
-    if DroneCapability.THERMAL_SCAN not in drone.capabilities:
-        return {"error": f"Drone '{drone_id}' does not support thermal scanning."}
-    if drone.battery_pct < 5.0:
-        return {"error": f"Drone '{drone_id}' has insufficient battery to scan."}
 
-    drone.battery_pct = max(0.0, drone.battery_pct - 5.0)
-    drone.status = DroneStatus.BUSY
-    drone.current_task = "thermal_scan"
-    registry.update(drone)
-
-    # Simulate detections around the drone's current position
-    num_detections = random.randint(0, 3)
-    detections = []
-    for i in range(num_detections):
-        detections.append(
-            {
-                "signature_id": f"sig-{drone_id}-{i + 1}",
-                "x": drone.x + random.randint(-5, 5),
-                "y": drone.y + random.randint(-5, 5),
-                "z": 0,
-                "heat_celsius": round(random.uniform(34.0, 37.5), 1),
-                "confidence": round(random.uniform(0.60, 0.99), 2),
-                "likely_survivor": True,
-            }
+    url = f"http://{drone.host}:{drone.port}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{url}/drones/{drone_id}/scan",
+            json={"radius": radius},
+            timeout=10.0,
         )
-
-    return {
-        "drone_id": drone_id,
-        "scan_position": {"x": drone.x, "y": drone.y, "z": drone.z},
-        "survivors_detected": len(detections),
-        "detections": detections,
-        "battery_remaining_pct": round(drone.battery_pct, 1),
-    }
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -251,31 +182,21 @@ def thermal_scan(drone_id: str) -> dict:
 
 
 @mcp.tool()
-def return_to_base(drone_id: str) -> dict:
+async def return_to_base(drone_id: str) -> dict:
     """
-    Command a drone to return to base (0, 0, 0) for charging.
+    Command a drone to return to base for charging.
 
-    Use this when battery is critically low OR when a drone has completed
-    its mission.  The drone is fully recharged upon arrival (simulation).
+    Battery charges gradually at 5%/s — poll get_battery_status to track progress.
+    Use this when battery is critically low OR when a drone has completed its mission.
     """
     drone = registry.get(drone_id)
     if not drone:
         return {"error": f"Drone '{drone_id}' not found."}
 
-    drone.x, drone.y, drone.z = 0, 0, 0
-    drone.battery_pct = 100.0
-    drone.status = DroneStatus.CHARGING
-    drone.current_task = "charging at base"
-    registry.update(drone)
-
-    return {
-        "drone_id": drone_id,
-        "success": True,
-        "position": {"x": 0, "y": 0, "z": 0},
-        "battery_pct": 100.0,
-        "status": DroneStatus.CHARGING.value,
-        "message": f"Drone {drone_id} has returned to base and is charging.",
-    }
+    url = f"http://{drone.host}:{drone.port}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(f"{url}/drones/{drone_id}/return", timeout=10.0)
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -284,58 +205,25 @@ def return_to_base(drone_id: str) -> dict:
 
 
 @mcp.tool()
-def delivery_aid(drone_id: str, x: int, y: int, z: int) -> dict:
+async def delivery_aid(drone_id: str, x: int, y: int, z: int) -> dict:
     """
     Dispatch a drone to deliver aid (medical supplies, food, rescue equipment)
     to the specified coordinates.
 
     The drone must have the delivery_aid capability and sufficient battery.
-    Battery cost: 0.5 % per unit of distance + 5 % for deployment.
-
-    If battery drops below threshold after delivery, a backup recommendation
-    is included in the response.
     """
     drone = registry.get(drone_id)
     if not drone:
         return {"error": f"Drone '{drone_id}' not found."}
-    if DroneCapability.DELIVERY_AID not in drone.capabilities:
-        return {"error": f"Drone '{drone_id}' does not support aid delivery."}
-    if drone.battery_pct < BATTERY_LOW_THRESHOLD:
-        return {
-            "error": (
-                f"Drone '{drone_id}' battery too low ({round(drone.battery_pct, 1)}%). "
-                "Return to base before attempting delivery."
-            )
-        }
 
-    distance = math.sqrt((x - drone.x) ** 2 + (y - drone.y) ** 2 + (z - drone.z) ** 2)
-    battery_cost = round(distance * 0.5 + 5.0, 2)
-
-    drone.x = x
-    drone.y = y
-    drone.z = z
-    drone.battery_pct = max(0.0, drone.battery_pct - battery_cost)
-    drone.status = DroneStatus.BUSY
-    drone.current_task = f"delivering aid to ({x},{y},{z})"
-    registry.update(drone)
-
-    result: dict = {
-        "drone_id": drone_id,
-        "success": True,
-        "delivered_to": {"x": x, "y": y, "z": z},
-        "battery_remaining_pct": round(drone.battery_pct, 1),
-        "message": f"Aid successfully delivered to ({x},{y},{z}).",
-    }
-
-    if drone.battery_pct < BATTERY_LOW_THRESHOLD:
-        backup = registry.find_nearest_idle(x, y, z, exclude_id=drone_id)
-        result["battery_warning"] = (
-            f"Battery critically low at {round(drone.battery_pct, 1)}%. "
-            "Call request_backup now."
+    url = f"http://{drone.host}:{drone.port}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{url}/drones/{drone_id}/deliver",
+            json={"x": x, "y": y, "z": z},
+            timeout=10.0,
         )
-        result["backup_drone_available"] = backup.drone_id if backup else None
-
-    return result
+    return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -344,50 +232,54 @@ def delivery_aid(drone_id: str, x: int, y: int, z: int) -> dict:
 
 
 @mcp.tool()
-def request_backup(drone_id: str) -> dict:
+async def request_backup(drone_id: str) -> dict:
     """
     Call this when a drone's battery drops below 20%.
 
-    Finds the nearest idle drone, dispatches it to the low-battery drone's
-    current position to take over the mission, and marks the original drone
-    as returning to base.
-
-    The agent should then call return_to_base on the original drone.
+    Finds the nearest idle drone by live status, dispatches it to the original
+    drone's position, and commands the original drone to return to base.
     """
-    drone = registry.get(drone_id)
-    if not drone:
-        return {"error": f"Drone '{drone_id}' not found."}
+    async with httpx.AsyncClient() as client:
+        statuses: list[tuple[str, str, dict]] = []
+        for d in registry.get_all():
+            if not d.host:
+                continue
+            url = f"http://{d.host}:{d.port}"
+            try:
+                r = await client.get(f"{url}/drones/{d.drone_id}/status", timeout=3.0)
+                statuses.append((d.drone_id, url, r.json()))
+            except Exception:
+                pass
 
-    backup = registry.find_nearest_idle(drone.x, drone.y, drone.z, exclude_id=drone_id)
-    if not backup:
-        return {
-            "drone_id": drone_id,
-            "success": False,
-            "message": "No idle drones available for backup. Consider returning to base.",
-        }
+        original = next((s for s in statuses if s[0] == drone_id), None)
+        if not original:
+            return {"error": f"Drone '{drone_id}' not found or unreachable."}
 
-    # Dispatch backup drone
-    backup.status = DroneStatus.BUSY
-    backup.current_task = (
-        f"backup for {drone_id} — heading to ({drone.x},{drone.y},{drone.z})"
-    )
-    registry.update(backup)
+        ox = original[2]["position"]["x"]
+        oy = original[2]["position"]["y"]
 
-    # Mark original drone as returning
-    drone.status = DroneStatus.RETURNING
-    drone.current_task = "returning to base (low battery)"
-    registry.update(drone)
+        idle = [s for s in statuses if s[0] != drone_id and s[2]["status"] == "idle"]
+        if not idle:
+            return {"success": False, "message": "No idle drones available."}
+
+        backup = min(
+            idle,
+            key=lambda s: abs(s[2]["position"]["x"] - ox) + abs(s[2]["position"]["y"] - oy),
+        )
+        backup_id, backup_url = backup[0], backup[1]
+
+        await client.post(
+            f"{backup_url}/drones/{backup_id}/move",
+            json={"x": ox, "y": oy, "z": 0},
+            timeout=10.0,
+        )
+        await client.post(f"{original[1]}/drones/{drone_id}/return", timeout=10.0)
 
     return {
         "drone_id": drone_id,
         "success": True,
-        "backup_drone_id": backup.drone_id,
-        "backup_dispatched_to": {"x": drone.x, "y": drone.y, "z": drone.z},
-        "message": (
-            f"Drone {backup.drone_id} dispatched to ({drone.x},{drone.y},{drone.z}) "
-            f"to take over from {drone_id}. "
-            f"Now call return_to_base('{drone_id}') to send it home."
-        ),
+        "backup_drone_id": backup_id,
+        "message": f"Drone {backup_id} dispatched. {drone_id} returning to base.",
     }
 
 
