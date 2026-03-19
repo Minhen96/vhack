@@ -21,6 +21,7 @@ import { Rubble } from './Rubble';
 import { Survivors } from './Survivors';
 import { Buildings } from './Buildings';
 import { CommandBase } from './CommandBase';
+import { ThermalHeatmap } from './ThermalHeatmap';
 
 // Seeded random number generator for deterministic random values
 function seededRandom(seed: number): () => number {
@@ -252,6 +253,9 @@ export function Scene() {
 
       {/* Ground Plane */}
       <Ground />
+
+      {/* Thermal Heatmap - persistent fog-of-war heat overlay */}
+      <ThermalHeatmap />
 
       {/* Dust Particle System */}
       <DustParticles count={800} />

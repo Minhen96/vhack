@@ -154,6 +154,13 @@ var (
 	BuildingsMutex sync.RWMutex
 )
 
+// OccupancyGrid maps each grid cell to the tallest building height above it.
+// Pre-built once after GenerateBuildings so bresenhamLOS can do O(1) lookups.
+var (
+	OccupancyGrid      map[[2]int]float64
+	OccupancyGridMutex sync.RWMutex
+)
+
 // GenerateBuildings creates buildings scattered across the map, avoiding the command base
 func GenerateBuildings(count int) []Building {
 	buildings := make([]Building, count)
@@ -181,6 +188,31 @@ func GenerateBuildings(count int) []Building {
 		log.Printf("🏢 Generated building %d at (%.1f, %.1f) size %.0fx%.0fx%.0f", i+1, bx, by, w, h, d)
 	}
 	return buildings
+}
+
+// buildOccupancyGrid pre-computes a height map from all building footprints.
+// Each cell stores the tallest building above it so bresenhamLOS can check
+// droneZ > cellHeight in O(1) without iterating buildings per ray step.
+func buildOccupancyGrid() {
+	grid := make(map[[2]int]float64)
+	BuildingsMutex.RLock()
+	for _, b := range Buildings {
+		halfW := b.Width / 2
+		halfD := b.Depth / 2
+		for ix := int(b.X - halfW); ix <= int(b.X+halfW); ix++ {
+			for iy := int(b.Y - halfD); iy <= int(b.Y+halfD); iy++ {
+				cell := [2]int{ix, iy}
+				if grid[cell] < b.Height {
+					grid[cell] = b.Height
+				}
+			}
+		}
+	}
+	BuildingsMutex.RUnlock()
+	OccupancyGridMutex.Lock()
+	OccupancyGrid = grid
+	OccupancyGridMutex.Unlock()
+	log.Printf("🗺️  Occupancy grid built: %d occupied cell(s)", len(grid))
 }
 
 // GetBuildingBlockedCells expands each building footprint into individual grid cells
@@ -489,6 +521,10 @@ func (h *Hub) handleDroneMessage(message []byte) {
 		// Broadcast to UI clients
 		h.broadcastToUIClients(message)
 
+	case MessageTypeScanHeatmap:
+		// Raw thermal readings from drone scan — forward to UI for heatmap rendering
+		h.broadcastToUIClients(message)
+
 	default:
 		// Forward other drone messages to UI
 		h.broadcastToUIClients(message)
@@ -687,21 +723,172 @@ func (h *Hub) GetInitialGridSnapshot() GridSnapshot {
 // =============================================================================
 
 // =============================================================================
-// Scan Handler — GET /scan
+// Thermal Scan — shared computation + HTTP handler + passive scanner
 // =============================================================================
 
-// ThermalReading is a single raw thermal data point returned by /scan.
-// The drone interprets temp_celsius: >30°C likely survivor, 14–26°C background.
+const DefaultScanRadius = 5.0 // grid cells; used as fallback when /scan is called without a radius
+
+// ThermalReading is a single raw thermal data point.
+// Drone interprets: 30–42 °C = likely human, 14–26 °C = building/background.
 type ThermalReading struct {
 	X           float64 `json:"x"`
 	Y           float64 `json:"y"`
 	TempCelsius float64 `json:"temp_celsius"`
 }
 
+// bresenhamLOS walks grid cells from (x1,y1) to (x2,y2) using Bresenham's line
+// algorithm. Returns true if line of sight is clear — no building cell in the path
+// is taller than droneZ. The start cell (drone position) is skipped.
+func bresenhamLOS(x1, y1, x2, y2 int, droneZ float64) bool {
+	dx := x2 - x1
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := y2 - y1
+	if dy < 0 {
+		dy = -dy
+	}
+	sx, sy := 1, 1
+	if x1 > x2 {
+		sx = -1
+	}
+	if y1 > y2 {
+		sy = -1
+	}
+	err := dx - dy
+	x, y := x1, y1
+
+	OccupancyGridMutex.RLock()
+	defer OccupancyGridMutex.RUnlock()
+
+	for {
+		if x == x2 && y == y2 {
+			return true // reached target — clear
+		}
+		if !(x == x1 && y == y1) { // skip drone's own cell
+			if h := OccupancyGrid[[2]int{x, y}]; h > droneZ {
+				return false // building taller than drone altitude blocks LOS
+			}
+		}
+		e2 := 2 * err
+		if e2 > -dy {
+			err -= dy
+			x += sx
+		}
+		if e2 < dx {
+			err += dx
+			y += sy
+		}
+	}
+}
+
+// inCone reports whether a target at (tx, ty) falls inside the drone's FOV cone.
+// Bearing uses the same convention as the drone's azimuth: atan2(dx, -dy) in degrees
+// (0° = south, 90° = east, clockwise). When fov >= 360 the check always passes —
+// used for full-circle active scans where direction doesn't matter.
+func inCone(droneX, droneY, tx, ty, azimuth, fov float64) bool {
+	if fov >= 360 {
+		return true
+	}
+	dx := tx - droneX
+	dy := ty - droneY
+	bearing := math.Atan2(dx, -dy) * 180 / math.Pi
+	bearing = math.Mod(bearing+360, 360)
+	diff := math.Abs(bearing - azimuth)
+	if diff > 180 {
+		diff = 360 - diff
+	}
+	return diff <= fov/2
+}
+
+// computeThermalReadings returns thermal readings visible from the drone's position.
+//
+// Three realism layers:
+//   1. FOV cone   — only targets inside azimuth±fov/2 are considered (inCone).
+//   2. LOS check  — Bresenham ray from drone to target; blocked if a building cell
+//                   is taller than droneZ (drone can see over buildings it flies above).
+//   3. 3D falloff — dist3D = sqrt(dx²+dy²+dz²); angle_factor = dz/dist3D so the
+//                   signal is strongest directly above the target and weakens at shallow
+//                   angles (matches a downward-pointing thermal camera).
+//
+// Altitude-scaled radius (passive cone scans only, fov < 360):
+//   ground_radius = droneZ × tan(fov/2) — the camera's actual ground footprint.
+//   effective_radius = min(commanded_radius, ground_radius).
+func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, fov float64) []ThermalReading {
+	// Altitude-scaled effective radius for cone scans (not full-circle active sweeps)
+	if fov < 360 && droneZ > 0 {
+		fovRad := fov * math.Pi / 180
+		groundRadius := droneZ * math.Tan(fovRad/2)
+		if groundRadius < scanRadius {
+			scanRadius = groundRadius
+		}
+	}
+
+	readings := []ThermalReading{}
+	droneXi := int(math.Round(droneX))
+	droneYi := int(math.Round(droneY))
+
+	SurvivorsMutex.RLock()
+	for _, s := range Survivors {
+		dx := s.X - droneX
+		dy := s.Z - droneY // Survivor.Z is the ground plane coordinate
+		dist2D := math.Sqrt(dx*dx + dy*dy)
+		if dist2D > scanRadius {
+			continue
+		}
+		if !inCone(droneX, droneY, s.X, s.Z, azimuth, fov) {
+			continue
+		}
+		if !bresenhamLOS(droneXi, droneYi, int(math.Round(s.X)), int(math.Round(s.Z)), droneZ) {
+			continue // building blocks line of sight
+		}
+		// 3D falloff + angle of incidence (strongest signal directly above)
+		dist3D := math.Sqrt(dx*dx + dy*dy + droneZ*droneZ)
+		angleFactor := 1.0
+		if dist3D > 0 {
+			angleFactor = droneZ / dist3D
+		}
+		apparent := s.Thermal * math.Exp(-dist3D*0.1) * angleFactor
+		noise := (rand.Float64() - 0.5) * 0.4
+		temp := math.Round((apparent+noise)*10) / 10
+		readings = append(readings, ThermalReading{X: s.X, Y: s.Z, TempCelsius: temp})
+	}
+	SurvivorsMutex.RUnlock()
+
+	BuildingsMutex.RLock()
+	for _, b := range Buildings {
+		dx := b.X - droneX
+		dy := b.Y - droneY
+		dist2D := math.Sqrt(dx*dx + dy*dy)
+		if dist2D <= 0 || dist2D > scanRadius {
+			continue
+		}
+		if !inCone(droneX, droneY, b.X, b.Y, azimuth, fov) {
+			continue
+		}
+		// Buildings: skip LOS check when drone is above the building
+		if droneZ <= b.Height {
+			if !bresenhamLOS(droneXi, droneYi, int(math.Round(b.X)), int(math.Round(b.Y)), droneZ) {
+				continue
+			}
+		}
+		dist3D := math.Sqrt(dx*dx + dy*dy + droneZ*droneZ)
+		angleFactor := 1.0
+		if dist3D > 0 {
+			angleFactor = droneZ / dist3D
+		}
+		apparent := b.Thermal * math.Exp(-dist3D*0.3) * angleFactor
+		noise := (rand.Float64() - 0.5) * 0.3
+		temp := math.Round((apparent+noise)*10) / 10
+		readings = append(readings, ThermalReading{X: b.X, Y: b.Y, TempCelsius: temp})
+	}
+	BuildingsMutex.RUnlock()
+
+	return readings
+}
+
 // ScanHandler handles GET /scan?x=&y=&z=&radius=
-// Returns raw thermal readings for all objects within the scan radius.
-// Survivors emit 36–37.5 °C; buildings emit 14–18 °C background heat.
-// The drone calls this instead of generating random detections.
+// Active scan called by the drone's thermal_scan function via HTTP.
 func ScanHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -715,44 +902,16 @@ func ScanHandler(w http.ResponseWriter, r *http.Request) {
 	droneY, _ := strconv.ParseFloat(q.Get("y"), 64)
 	droneZ, _ := strconv.ParseFloat(q.Get("z"), 64)
 	scanRadius, _ := strconv.ParseFloat(q.Get("radius"), 64)
+	azimuth, _ := strconv.ParseFloat(q.Get("azimuth"), 64)
+	fov, _ := strconv.ParseFloat(q.Get("fov"), 64)
 	if scanRadius <= 0 {
-		scanRadius = 5
+		scanRadius = DefaultScanRadius
+	}
+	if fov <= 0 {
+		fov = 360 // no fov param = full-circle active scan
 	}
 
-	readings := []ThermalReading{}
-
-	// Survivors — body heat 36–37.5 °C, falls off with distance
-	SurvivorsMutex.RLock()
-	for _, s := range Survivors {
-		dx := s.X - droneX
-		dy := s.Z - droneY // Survivor.Z is ground plane; drone Y is also ground plane
-		dist := math.Sqrt(dx*dx + dy*dy)
-		if dist <= scanRadius {
-			apparent := s.Thermal * math.Exp(-dist*0.1)
-			noise := (rand.Float64() - 0.5) * 0.4
-			temp := math.Round((apparent+noise)*10) / 10
-			readings = append(readings, ThermalReading{X: s.X, Y: s.Z, TempCelsius: temp})
-		}
-	}
-	SurvivorsMutex.RUnlock()
-
-	// Buildings — cooler background heat 14–18 °C, falls off faster
-	BuildingsMutex.RLock()
-	for _, b := range Buildings {
-		dx := b.X - droneX
-		dy := b.Y - droneY
-		dist := math.Sqrt(dx*dx + dy*dy)
-		if dist > 0 && dist <= scanRadius {
-			apparent := b.Thermal * math.Exp(-dist*0.3)
-			noise := (rand.Float64() - 0.5) * 0.3
-			temp := math.Round((apparent+noise)*10) / 10
-			readings = append(readings, ThermalReading{X: b.X, Y: b.Y, TempCelsius: temp})
-		}
-	}
-	BuildingsMutex.RUnlock()
-
-	_ = droneZ // altitude penalty reserved for Phase 4
-
+	readings := computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, fov)
 	json.NewEncoder(w).Encode(readings)
 }
 

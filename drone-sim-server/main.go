@@ -88,6 +88,7 @@ func runServer() {
 	buildingCount := 5 + rand.Intn(4) // 5 to 8
 	log.Printf("🏢 Generating %d buildings...", buildingCount)
 	Buildings = GenerateBuildings(buildingCount)
+	buildOccupancyGrid()
 
 	// Create a new Hub instance
 	hub := NewHub()

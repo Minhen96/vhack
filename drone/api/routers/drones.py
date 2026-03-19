@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -11,6 +12,7 @@ from drone.functions import (
     get_battery_status,
     get_drone_status,
     move_to,
+    passive_waypoint_scan,
     return_to_base,
     thermal_scan,
 )
@@ -47,6 +49,7 @@ async def move(drone_id: str, body: MoveRequest) -> MoveResult:
     async def on_waypoint(d: Drone, step_dist: int) -> None:
         await map_client.send_position(d, step_dist)
         await map_client.send_drone_status(d)
+        asyncio.create_task(passive_waypoint_scan(d))
 
     result = await move_to(drone, body.x, body.y, body.z, on_waypoint=on_waypoint)
     # Final status push — sets drone to IDLE (or confirms blocked position).
@@ -59,7 +62,10 @@ async def move(drone_id: str, body: MoveRequest) -> MoveResult:
 async def scan(drone_id: str, body: ScanRequest = ScanRequest()) -> ScanResult:
     drone = _lookup(drone_id)
     result = await thermal_scan(drone, body.radius)
-    # Notify Map Engine: each survivor signal found
+    # Send raw readings to UI for heatmap rendering (all temperatures, unfiltered)
+    if result.raw_readings:
+        await map_client.send_scan_heatmap(drone, result.raw_readings)
+    # Notify hub: each survivor signal found (>30°C detections only)
     for signal in result.detections:
         await map_client.send_survivor_detected(drone, signal.x, signal.y, drone.z, signal.confidence)
     await map_client.send_drone_status(drone)
@@ -74,6 +80,7 @@ async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
     async def on_waypoint(d: Drone, step_dist: int) -> None:
         await map_client.send_position(d, step_dist)
         await map_client.send_drone_status(d)
+        asyncio.create_task(passive_waypoint_scan(d))
 
     result = await deliver_aid(drone, body.x, body.y, body.z, on_waypoint=on_waypoint)
     # Notify Map Engine: aid delivered at location + final status
@@ -91,6 +98,7 @@ async def recall(drone_id: str) -> ReturnResult:
     async def on_waypoint(d: Drone, step_dist: int) -> None:
         await map_client.send_position(d, step_dist)
         await map_client.send_drone_status(d)
+        asyncio.create_task(passive_waypoint_scan(d))
 
     # Push live battery updates every second while charging so Map Engine
     # sees the battery rising in real-time without needing to poll

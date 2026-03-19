@@ -3,10 +3,11 @@ package main
 // MessageType constants for WebSocket message types
 const (
 	MessageTypeInitConnection   = "init_connection"
-	MessageTypeSendPosition      = "send_position"
-	MessageTypeSurvivorDetected  = "survivor_detected"
-	MessageTypeGridSnapshot      = "grid_snapshot"
-	MessageTypeGridUpdate         = "grid_update"
+	MessageTypeSendPosition     = "send_position"
+	MessageTypeSurvivorDetected = "survivor_detected"
+	MessageTypeGridSnapshot     = "grid_snapshot"
+	MessageTypeGridUpdate       = "grid_update"
+	MessageTypeScanHeatmap      = "scan_heatmap" // drone → hub → UI: raw thermal readings for heatmap
 )
 
 // =============================================================================

@@ -68,6 +68,9 @@ export function Drone({ droneId }: DroneProps) {
   const targetAzimuth = useRef(0);
   const currentSpherical = useRef({ azimuth: 0, elevation: 0, fov: 60, scan_radius: 10 });
   const droneStatus = useRef<DroneStatus>('SCANNING');
+  // Track last scan_radius to avoid recreating cone geometry every frame
+  const prevScanRadius = useRef(-1);
+  const prevFov = useRef(-1);
   
   // Raycast detection state
   const lastDetectionTime = useRef(0);
@@ -230,12 +233,24 @@ export function Drone({ droneId }: DroneProps) {
     if (coneRef.current) {
       const coneHeight = spherical.scan_radius * 2;
       const coneRadius = Math.tan(THREE.MathUtils.degToRad(spherical.fov / 2)) * coneHeight;
-      
-      // Update cone geometry
-      const coneGeo = coneRef.current.geometry as THREE.ConeGeometry;
-      coneGeo.dispose();
-      coneRef.current.geometry = new THREE.ConeGeometry(coneRadius, coneHeight, 32, 1, true);
-      coneRef.current.position.y = -coneHeight / 2;
+
+      // Only recreate geometry when scan_radius or fov actually changes (not every frame)
+      if (spherical.scan_radius !== prevScanRadius.current || spherical.fov !== prevFov.current) {
+        prevScanRadius.current = spherical.scan_radius;
+        prevFov.current = spherical.fov;
+        const coneGeo = coneRef.current.geometry as THREE.ConeGeometry;
+        coneGeo.dispose();
+        coneRef.current.geometry = new THREE.ConeGeometry(coneRadius, coneHeight, 32, 1, true);
+        coneRef.current.position.y = -coneHeight / 2;
+      }
+
+      // Pulse cone opacity: active scan = rhythmic glow, idle = faint
+      const isScanning = droneStatus.current === 'SCANNING';
+      const targetOpacity = isScanning
+        ? 0.06 + Math.abs(Math.sin(time * 2.5)) * 0.12  // pulse 0.06–0.18
+        : 0.03;
+      const coneMat = coneRef.current.material as THREE.MeshBasicMaterial;
+      coneMat.opacity = THREE.MathUtils.lerp(coneMat.opacity, targetOpacity, 0.05);
     }
     
     // 9. Spin rotors

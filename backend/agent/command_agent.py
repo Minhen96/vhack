@@ -59,7 +59,18 @@ SYSTEM_PROMPT = (
     "- Human body temperature: 36–37.5 °C — readings above 30 °C indicate a likely survivor.\n"
     "- Buildings and rubble emit 14–26 °C background heat (not survivors).\n"
     "- Follow the heat gradient: move toward the hottest reading and scan again to refine position.\n"
-    "- A reading above 30 °C is a confirmed survivor signal — call delivery_aid immediately.\n"
+    "- A reading above 30 °C is a confirmed survivor signal — call delivery_aid immediately.\n\n"
+    "## Altitude Strategy (z coordinate)\n"
+    "- The z parameter in move_to controls flight altitude. Default: z=10.\n"
+    "- Buildings are 3–10 units tall. Flying above z=10 clears all buildings.\n"
+    "- HIGH altitude (z=12–20): flies straight over buildings, wider scan footprint, but weaker thermal signal.\n"
+    "- LOW altitude (z=3–5): must navigate around buildings, narrower view, but stronger thermal signal.\n"
+    "- Buildings block line of sight at low altitude — a survivor behind a building may not be detected.\n"
+    "- Recommended workflow:\n"
+    "  1. Fly high (z=12) to search large areas quickly — buildings do not block path or scan.\n"
+    "  2. When a weak signal is detected, descend (z=4) directly above the reading to confirm.\n"
+    "  3. Strong signal (>34 °C) at low altitude = confirmed survivor — deliver aid.\n"
+    "- passive scan (while moving) uses FOV cone forward — fly in multiple directions to improve coverage.\n"
 )
 
 

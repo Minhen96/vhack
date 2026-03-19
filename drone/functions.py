@@ -35,6 +35,10 @@ from drone.pathfinding import astar
 
 logger = logging.getLogger(__name__)
 
+# Buildings are generated 3–10 units tall. Above this threshold the drone
+# flies over all buildings and A* treats every cell as passable.
+MAX_BUILDING_HEIGHT: int = 10
+
 # Maps internal DroneStatus → (MCP status string, current_task string | None)
 # MCP contract uses: idle | busy | returning | charging | offline
 # "busy" covers any active operation; current_task gives the detail.
@@ -130,6 +134,9 @@ async def move_to(
 
     goal = (x, y)
     steps = 0
+    start_z = drone.z
+    start_x, start_y = drone.x, drone.y
+    total_h_dist = _manhattan(drone.x, drone.y, x, y)
 
     while (drone.x, drone.y) != goal:
         if drone.battery_critical:
@@ -147,7 +154,11 @@ async def move_to(
         # Because the Map Engine pushes grid_update messages in real-time,
         # _blocked may have changed since the last step (new rubble, other drone moved).
         # Re-planning every step means the drone automatically reroutes mid-path.
-        path = astar((drone.x, drone.y), goal, map_client.get_blocked())
+        # Above max building height -> fly straight over everything
+
+        blocked = set() if drone.z > MAX_BUILDING_HEIGHT else map_client.get_blocked()
+
+        path = astar((drone.x, drone.y), goal, blocked)
 
         if not path:
             # A* returned empty — goal is completely surrounded, no way through.
@@ -175,7 +186,21 @@ async def move_to(
         if dx != 0 or dy != 0:
             drone.azimuth = math.degrees(math.atan2(dx, -dy)) % 360
 
-        drone.x, drone.y, drone.z = wx, wy, z
+        drone.x, drone.y = wx, wy
+
+        # Gradually interpolate z toward target based on horizontal progress
+
+        if total_h_dist > 0:
+
+            h_traveled = _manhattan(start_x, start_y, drone.x, drone.y)
+
+            progress = min(h_traveled / total_h_dist, 1.0)
+
+            drone.z = round(start_z + (z - start_z) * progress)
+
+        else:
+
+            drone.z = z
         drone.status = moving_status  # MOVING by default, DELIVERING/RETURNING when called by those functions
         steps += 1
 
@@ -196,6 +221,43 @@ async def move_to(
         new_position=Position(x=x, y=y, z=z),
         battery_remaining_pct=drone.battery,
     )
+
+
+async def passive_waypoint_scan(drone: Drone, radius: int = 3) -> None:
+    """Lightweight thermal sweep fired at each movement waypoint.
+
+    Only runs for scanner drones (thermal_scan capability required).
+    Uses the drone's current azimuth and FOV so only what's in the forward
+    cone is detected — matching the visual FOV cone in the UI.
+
+    Called fire-and-forget from on_waypoint — never awaited, so it does not
+    add latency to the movement loop. Results go into map_client's heat buffer;
+    thermal_scan merges them on the next explicit commanded scan.
+    """
+    if not drone.has_capability("thermal_scan"):
+        return  # delivery drones have no thermal camera
+
+    from drone.core.map_client import map_client
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{SIM_SERVER_URL}/scan",
+                params={
+                    "x": drone.x,
+                    "y": drone.y,
+                    "z": drone.z,
+                    "radius": radius,
+                    "azimuth": drone.azimuth,
+                    "fov": drone.fov,
+                },
+                timeout=3.0,
+            )
+        readings = resp.json()
+        if readings:
+            map_client.add_heat_readings(readings)
+            logger.debug("passive_waypoint_scan: buffered %d reading(s) at (%d,%d)", len(readings), drone.x, drone.y)
+    except Exception:
+        pass  # silent — passive scan failure must never disrupt movement
 
 
 async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanResult:
@@ -226,29 +288,70 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
     drone.status = DroneStatus.SCANNING
     _drain(drone, BATTERY_DRAIN_SCAN)
 
-    # Query sim server for real thermal readings around the drone's position.
-    # Sim server returns raw °C values for survivors (36–37.5°C) and buildings (14–18°C).
-    # Any reading above 30°C is interpreted as a likely human heat signature.
-    detections: list[SurvivorSignal] = []
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{SIM_SERVER_URL}/scan",
-                params={"x": drone.x, "y": drone.y, "z": drone.z, "radius": radius},
-                timeout=5.0,
-            )
-        readings = resp.json()
-        detections = [
-            SurvivorSignal(
-                x=int(round(r["x"])),
-                y=int(round(r["y"])),
-                confidence=round(min(r["temp_celsius"] / 37.5, 1.0), 3),
-            )
-            for r in readings
-            if 30 < r.get("temp_celsius", 0) < 42  # human range: 30–42°C (>42 = fire/equipment)
-        ]
-    except Exception:
-        logger.exception("thermal_scan: failed to reach sim server at %s", SIM_SERVER_URL)
+    # Active scan — query sim server for thermal readings at current position.
+    # Passive buffer — heat_signature readings pushed by the sim server's background
+    # scanner while the drone was flying past (no explicit scan needed).
+    # Merge both: same grid cell keeps the highest temperature reading seen.
+    from drone.core.map_client import map_client
+
+    all_temps: dict[tuple[int, int], float] = {}
+
+    # Rotation sweep: drone rotates 360 degrees in steps equal to its FOV.
+    # At each angle the camera scans what is in its forward cone, then the drone
+    # rotates to the next angle. Full circle = num_steps * fov_per_step >= 360.
+    # send_position at each step so the UI shows the drone physically spinning.
+    num_steps = math.ceil(360 / drone.fov)
+    step_angle = 360 / num_steps
+    original_azimuth = drone.azimuth
+
+    for i in range(num_steps):
+        drone.azimuth = (i * step_angle) % 360
+        await map_client.send_position(drone, 0)
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{SIM_SERVER_URL}/scan",
+                    params={
+                        "x": drone.x,
+                        "y": drone.y,
+                        "z": drone.z,
+                        "radius": radius,
+                        "azimuth": drone.azimuth,
+                        "fov": drone.fov,
+                    },
+                    timeout=5.0,
+                )
+            for r in resp.json():
+                key = (int(round(r["x"])), int(round(r["y"])))
+                all_temps[key] = max(all_temps.get(key, 0.0), r.get("temp_celsius", 0.0))
+        except Exception:
+            logger.exception("thermal_scan: step %d scan failed", i)
+        await asyncio.sleep(0.3)
+
+    drone.azimuth = original_azimuth
+    await map_client.send_position(drone, 0)  # restore facing direction in UI
+
+    # Merge passive buffer (keeps whichever temp is higher per cell)
+    for r in map_client.get_recent_heat():
+        key = (int(round(r["x"])), int(round(r["y"])))
+        all_temps[key] = max(all_temps.get(key, 0.0), r.get("temp_celsius", 0.0))
+
+    # All raw readings for heatmap rendering (every cell, any temperature)
+    raw_readings: list[dict] = [
+        {"x": x, "y": y, "temp_celsius": round(temp, 1)}
+        for (x, y), temp in all_temps.items()
+    ]
+
+    # Detections = only the human-range readings (30–42°C)
+    detections: list[SurvivorSignal] = [
+        SurvivorSignal(
+            x=x,
+            y=y,
+            confidence=round(min(temp / 37.5, 1.0), 3),
+        )
+        for (x, y), temp in all_temps.items()
+        if 30 < temp < 42  # human range: >42°C = fire/equipment, ignored
+    ]
 
     drone.status = DroneStatus.IDLE
 
@@ -261,6 +364,7 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
         scan_position=scan_pos,
         survivors_detected=len(detections) > 0,
         detections=detections,
+        raw_readings=raw_readings,
         scan_area=ScanArea(cx=drone.x, cy=drone.y, r=radius),
         battery_remaining_pct=drone.battery,
     )

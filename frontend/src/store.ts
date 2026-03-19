@@ -79,13 +79,14 @@ export type DroneStatus = 'SCANNING' | 'RETURNING' | 'IDLE' | 'SEARCHING';
 export type SurvivorStatus = 'DETECTED' | 'CONFIRMED' | 'RESCUED';
 
 /** WebSocket message types */
-type WebSocketMessageType = 
+type WebSocketMessageType =
   | 'init_connection'
   | 'send_position'
   | 'survivor_detected'
   | 'survivors_update'
   | 'grid_snapshot'
-  | 'grid_update';
+  | 'grid_update'
+  | 'scan_heatmap';
 
 /** Raw WebSocket message from server */
 interface WebSocketMessage {
@@ -115,6 +116,10 @@ interface DroneStore {
   // Buildings
   buildings: Building[];
 
+  // Thermal heatmap tiles — accumulated as drone scans.
+  // Key = "gridX,gridY", value = highest temp_celsius seen at that cell.
+  heatTiles: Record<string, number>;
+
   // Hover state for UI interaction
   hoveredDroneId: string | null;
 
@@ -128,6 +133,7 @@ interface DroneStore {
   updateSurvivor: (id: string, updates: Partial<Survivor>) => void;
   setBlockedAreas: (blocked: BlockedArea[], timestamp: number) => void;
   setBuildings: (buildings: Building[]) => void;
+  addHeatTiles: (tiles: Array<{ x: number; y: number; temp_celsius: number }>) => void;
   setHoveredDroneId: (droneId: string | null) => void;
   setWsUrl: (url: string) => void;
   reset: () => void;
@@ -523,6 +529,16 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
       console.log('Grid update received:', message);
       break;
     }
+
+    case 'scan_heatmap': {
+      const data = message as unknown as {
+        readings: Array<{ x: number; y: number; temp_celsius: number }>;
+      };
+      if (data.readings && data.readings.length > 0) {
+        useStore.getState().addHeatTiles(data.readings);
+      }
+      break;
+    }
     
     case 'init_connection': {
       const initData = message as unknown as {
@@ -558,6 +574,7 @@ const initialState = {
   blockedAreas: [] as BlockedArea[],
   gridTimestamp: 0,
   buildings: [] as Building[],
+  heatTiles: {} as Record<string, number>,
   hoveredDroneId: null,
 };
 
@@ -601,6 +618,17 @@ export const useStore = create<DroneStore>((set) => ({
     set({ blockedAreas: blocked, gridTimestamp: timestamp }),
 
   setBuildings: (buildings) => set({ buildings }),
+
+  addHeatTiles: (tiles) => set((state) => {
+    const next = { ...state.heatTiles };
+    for (const { x, y, temp_celsius } of tiles) {
+      const key = `${Math.round(x)},${Math.round(y)}`;
+      if (temp_celsius > (next[key] ?? -Infinity)) {
+        next[key] = temp_celsius;
+      }
+    }
+    return { heatTiles: next };
+  }),
 
   setHoveredDroneId: (droneId) => set({ hoveredDroneId: droneId }),
   

@@ -36,6 +36,13 @@ class MapEngineClient:
         # Starts empty — all cells treated as passable until map engine sends data.
         self._blocked: set[tuple[int, int]] = set()
 
+        # Rolling buffer of passive heat readings from waypoint scans.
+        # Populated by passive_waypoint_scan (called fire-and-forget at each movement
+        # step). Capped at 50 entries — older readings are evicted.
+        # thermal_scan merges these with its active /scan results so readings picked
+        # up while flying are not lost.
+        self._recent_heat: list[dict] = []
+
         # Background asyncio task that reads incoming WS messages from map engine.
         self._listener_task: asyncio.Task | None = None
 
@@ -155,6 +162,7 @@ class MapEngineClient:
                         self._blocked.add(cell)
                         logger.debug("grid_update: (%d,%d) blocked", *cell)
 
+
             except websockets.ConnectionClosed:
                 logger.warning("Map Engine WS closed — will reconnect in 5s.")
                 self._ws = None
@@ -176,6 +184,25 @@ class MapEngineClient:
         treats all cells as passable and falls back to straight-line movement.
         """
         return self._blocked
+
+    def add_heat_readings(self, readings: list[dict]) -> None:
+        """Add thermal readings from a waypoint passive scan to the rolling buffer.
+
+        Called fire-and-forget from passive_waypoint_scan after each movement step.
+        Capped at 50 entries — oldest evicted when full.
+        """
+        self._recent_heat.extend(readings)
+        if len(self._recent_heat) > 50:
+            self._recent_heat = self._recent_heat[-50:]
+
+    def get_recent_heat(self) -> list[dict]:
+        """Return the rolling buffer of passive heat readings from waypoint scans.
+
+        Each entry is {"x": float, "y": float, "temp_celsius": float}.
+        thermal_scan merges these with its active /scan results so readings
+        picked up while flying are not lost.
+        """
+        return list(self._recent_heat)
 
     async def close(self) -> None:
         if self._listener_task:
@@ -248,6 +275,20 @@ class MapEngineClient:
             "y": y,
             "z": z,
             "confidence": confidence,
+        })
+
+    async def send_scan_heatmap(self, drone: Drone, readings: list[dict]) -> None:
+        """Send all raw thermal readings to the hub for heatmap rendering in the UI.
+
+        readings is the full unfiltered list from thermal_scan — includes both
+        survivor heat (>30°C) and background heat (buildings, ground).
+        Hub broadcasts this to UI clients so ThermalHeatmap can colour the ground.
+        """
+        await self._send({
+            "type": "scan_heatmap",
+            "drone_id": drone.id,
+            "timestamp": _now_ms(),
+            "readings": readings,
         })
 
     async def send_aid_delivered(self, drone: Drone, x: int, y: int, z: int) -> None:
