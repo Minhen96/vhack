@@ -8,11 +8,10 @@ import { Human } from './Human';
  */
 export function Survivors() {
   const storeSurvivors = useStore(state => state.survivors);
-  const displaySurvivors = storeSurvivors;
 
   return (
     <group>
-      {displaySurvivors.map((survivor) => (
+      {storeSurvivors.map((survivor) => (
         <Human
           key={survivor.id}
           survivor={survivor}

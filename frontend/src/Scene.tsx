@@ -283,7 +283,7 @@ export function Scene() {
       />
 
       {/* Post-Processing Effects - Cinematic sunset look */}
-      <EffectComposer>
+      <EffectComposer enableNormalPass>
         {/* SSAO - Screen Space Ambient Occlusion */}
         <SSAO
           blendFunction={BlendFunction.MULTIPLY}

@@ -454,8 +454,9 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         survivors?: Array<{ id: string; x: number; y: number; z: number; status: string }>;
       };
 
+      // Initialize survivors as UNDETECTED (blue) - Human component handles 3D model rendering
       if (initData.survivors && initData.survivors.length > 0) {
-        const undetected: Survivor[] = initData.survivors.map(s => ({
+        const survivors: Survivor[] = initData.survivors.map(s => ({
           id: s.id,
           position: { x: s.x, y: 0.3, z: s.z },
           status: 'UNDETECTED' as SurvivorStatus,
@@ -464,7 +465,7 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
           timestamp: Date.now(),
           detected_by: '',
         }));
-        useStore.getState().setSurvivors(undetected);
+        useStore.getState().setSurvivors(survivors);
       }
 
       if (initData.buildings && initData.buildings.length > 0) {

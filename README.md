@@ -38,7 +38,32 @@ Frontend :5173   React + Three.js — real-time 3D visualizer
 | Node.js | 18+ |
 | npm | 9+ |
 
-## Setup
+## Quick Start (Automated)
+
+The project includes scripts to automate setup and execution for different operating systems.
+
+### Windows (PowerShell)
+```powershell
+# 1. Setup environment (venv, .env, deps)
+.\dev.ps1 -Setup
+
+# 2. Run all services
+.\dev.ps1
+```
+
+### Linux / macOS (Bash)
+```bash
+# 1. Setup environment (venv, .env, deps)
+chmod +x dev.sh
+./dev.sh --setup
+
+# 2. Run all services
+./dev.sh
+```
+
+---
+
+## Manual Setup (Detailed)
 
 ### 1. Clone the repository
 
