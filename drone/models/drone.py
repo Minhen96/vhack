@@ -32,7 +32,7 @@ COMMON_CAPABILITIES: list[str] = [
 # Type-specific capabilities — what makes each type unique
 CAPABILITIES: dict[DroneType, list[str]] = {
     DroneType.SCANNER:  ["thermal_scan"],
-    DroneType.DELIVERY: ["deliver_aid"],
+    DroneType.DELIVERY: ["delivery_aid"],
 }
 
 

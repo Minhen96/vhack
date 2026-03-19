@@ -258,7 +258,7 @@ async def deliver_aid(
     z: int = 0,
     on_waypoint: Callable[[Drone, int], Awaitable[None]] | None = None,
 ) -> DeliverResult:
-    if not drone.has_capability("deliver_aid"):
+    if not drone.has_capability("delivery_aid"):
         logger.warning("deliver_aid refused — drone %s (type=%s) lacks capability", drone.id, drone.type)
         return DeliverResult(
             drone_id=drone.id,
