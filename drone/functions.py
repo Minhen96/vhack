@@ -230,7 +230,11 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
     detections: list[SurvivorSignal] = []
     for dy in range(-radius, radius + 1):
         for dx in range(-radius, radius + 1):
+            if dx * dx + dy * dy > radius * radius:
+                continue  # outside circular scan area
             nx, ny = drone.x + dx, drone.y + dy
+            if nx < 0 or ny < 0:
+                continue  # outside grid bounds
             if random.random() < 0.1:
                 confidence = round(random.uniform(0.7, 1.0), 3)
                 detections.append(SurvivorSignal(x=nx, y=ny, confidence=confidence))

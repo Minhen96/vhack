@@ -11,7 +11,7 @@ class DroneRegistry:
 
     def __init__(self) -> None:
         self._drones: dict[str, DroneState] = {}
-        self._seed_fleet()
+        # self._seed_fleet()  # disabled: real drones register themselves on startup
 
     def _seed_fleet(self) -> None:
         """Initialise 3 drones for simulation."""
@@ -71,7 +71,7 @@ class DroneRegistry:
     def reset(self) -> None:
         """Reset fleet to initial state for a new mission."""
         self._drones.clear()
-        self._seed_fleet()
+        # self._seed_fleet()  # disabled: real drones re-register themselves
 
     def register(self, drone: DroneState) -> None:
         """Register a new drone (or re-register an existing one)."""
