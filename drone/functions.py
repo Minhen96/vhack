@@ -12,13 +12,18 @@ from drone.constants import (
     BASE_Y,
     BASE_Z,
     BATTERY_CHARGE_RATE,
+    BATTERY_CRITICAL_THRESHOLD,
     BATTERY_DRAIN_DELIVER,
     BATTERY_DRAIN_PER_CELL,
     BATTERY_DRAIN_SCAN,
     BATTERY_LOW_THRESHOLD,
+    MAP_X_MAX,
+    MAP_X_MIN,
+    MAP_Y_MAX,
+    MAP_Y_MIN,
     SCAN_RADIUS_DEFAULT,
 )
-from drone.core.config import SIM_SERVER_URL
+from drone.core.config import MCP_URL, SIM_SERVER_URL
 from drone.models.drone import Drone, DroneStatus
 from drone.models.results import (
     BatteryResult,
@@ -35,6 +40,43 @@ from drone.models.results import (
 from drone.pathfinding import astar
 
 logger = logging.getLogger(__name__)
+
+_BUCKET_SIZE = SCAN_RADIUS_DEFAULT  # must match backend/coverage.py BUCKET_SIZE
+
+
+async def _fetch_covered_buckets() -> set[tuple[int, int]]:
+    """Query the backend for already-covered grid buckets (one call per search start)."""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{MCP_URL}/coverage", timeout=3.0)
+            data = resp.json()
+            return {(b[0], b[1]) for b in data.get("buckets", [])}
+    except Exception:
+        return set()
+
+
+async def _report_covered(x: int, y: int) -> None:
+    """Fire-and-forget: tell the backend this position has been scanned."""
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(f"{MCP_URL}/internal/coverage",
+                              json={"x": x, "y": y}, timeout=1.0)
+    except Exception:
+        pass
+
+
+async def _push_event(event: dict) -> None:
+    """Fire-and-forget: push an event to the backend event queue."""
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(f"{MCP_URL}/internal/event", json=event, timeout=2.0)
+    except Exception:
+        pass
+
+
+def _bucket(x: int, y: int) -> tuple[int, int]:
+    return (x // _BUCKET_SIZE, y // _BUCKET_SIZE)
+
 
 # Buildings are generated 3–10 units tall. Above this threshold the drone
 # flies over all buildings and A* treats every cell as passable.
@@ -73,6 +115,9 @@ async def _charge_loop(
         if on_tick:
             await on_tick(drone)
     logger.info("charging complete: %s battery=%.1f%%", drone.id, drone.battery)
+    # Notify the LLM agent so it can restart the search immediately
+    # instead of waiting for a wait_for_event(30) timeout to expire.
+    asyncio.create_task(_push_event({"type": "charging_complete", "drone_id": drone.id}))
 
 
 def _manhattan(x1: int, y1: int, x2: int, y2: int) -> int:
@@ -159,7 +204,8 @@ async def move_to(
 
         blocked = set() if drone.z > MAX_BUILDING_HEIGHT else map_client.get_blocked()
 
-        path = astar((drone.x, drone.y), goal, blocked)
+        path = astar((drone.x, drone.y), goal, blocked,
+                     bounds=(MAP_X_MIN, MAP_Y_MIN, MAP_X_MAX, MAP_Y_MAX))
 
         if not path:
             # A* returned empty — goal is completely surrounded, no way through.
@@ -224,16 +270,24 @@ async def move_to(
     )
 
 
-async def passive_waypoint_scan(drone: Drone, radius: int = 3) -> None:
+async def passive_waypoint_scan(
+    drone: Drone,
+    radius: int = SCAN_RADIUS_DEFAULT,
+    on_survivor: Callable[[int, int, float], Awaitable[None]] | None = None,
+) -> None:
     """Lightweight thermal sweep fired at each movement waypoint.
 
     Only runs for scanner drones (thermal_scan capability required).
-    Uses the drone's current azimuth and FOV so only what's in the forward
-    cone is detected — matching the visual FOV cone in the UI.
+    Uses fov=360 (full-circle downward look) so the drone sees everything
+    directly below it as it flies — not just the forward-facing 60° arc.
 
     Called fire-and-forget from on_waypoint — never awaited, so it does not
     add latency to the movement loop. Results go into map_client's heat buffer;
     thermal_scan merges them on the next explicit commanded scan.
+
+    on_survivor(x, y, temp) is called for each human-range reading (30–42°C)
+    so the background search task can push survivor_found events in real-time
+    without waiting for the next explicit scan waypoint.
     """
     if not drone.has_capability("thermal_scan"):
         return  # delivery drones have no thermal camera
@@ -249,7 +303,7 @@ async def passive_waypoint_scan(drone: Drone, radius: int = 3) -> None:
                     "z": drone.z,
                     "radius": radius,
                     "azimuth": drone.azimuth,
-                    "fov": drone.fov,
+                    "fov": 360,   # full circle — scan everything below, not just forward arc
                 },
                 timeout=3.0,
             )
@@ -257,6 +311,15 @@ async def passive_waypoint_scan(drone: Drone, radius: int = 3) -> None:
         if readings:
             map_client.add_heat_readings(readings)
             logger.debug("passive_waypoint_scan: buffered %d reading(s) at (%d,%d)", len(readings), drone.x, drone.y)
+            if on_survivor:
+                for r in readings:
+                    temp = r.get("temp_celsius", 0.0)
+                    if 30 < temp < 42:
+                        await on_survivor(int(round(r["x"])), int(round(r["y"])), temp)
+        # Mark current position as covered — passive scan fires at every movement
+        # cell (step=1) with radius=8 fov=360, so the flight path is fully scanned.
+        # This prevents the next charge cycle from re-scanning the same ground.
+        asyncio.create_task(_report_covered(drone.x, drone.y))
     except Exception:
         pass  # silent — passive scan failure must never disrupt movement
 
@@ -372,16 +435,34 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
 
 
 def _snake_waypoints(
-    x1: int, y1: int, x2: int, y2: int, step: int
+    x1: int, y1: int, x2: int, y2: int, step: int,
+    start_x: int = 0, start_y: int = 0,
 ) -> list[tuple[int, int]]:
-    """Generate boustrophedon (snake) scan waypoints over a rectangular area."""
+    """Generate boustrophedon (snake) scan waypoints over a rectangular area.
+
+    Starts from the corner nearest to (start_x, start_y) so the drone
+    wastes minimum battery flying to the first waypoint.
+    """
     lx, hx = min(x1, x2), max(x1, x2)
     ly, hy = min(y1, y2), max(y1, y2)
     xs = list(range(lx, hx + 1, step))
     ys = list(range(ly, hy + 1, step))
+
+    # Pick the corner of this sector nearest to the drone's current position
+    corners = [(lx, ly), (lx, hy), (hx, ly), (hx, hy)]
+    near_cx, near_cy = min(corners, key=lambda c: abs(c[0] - start_x) + abs(c[1] - start_y))
+
+    # Traverse y from the near edge toward the far edge
+    if near_cy > (ly + hy) / 2:
+        ys = list(reversed(ys))
+
+    # First row starts from the x-edge nearest to the drone
+    x_start_right = near_cx > (lx + hx) / 2
+
     waypoints: list[tuple[int, int]] = []
     for i, y in enumerate(ys):
-        row = xs if i % 2 == 0 else list(reversed(xs))
+        use_reversed = (i % 2 == 0) == x_start_right
+        row = list(reversed(xs)) if use_reversed else xs
         for x in row:
             waypoints.append((x, y))
     return waypoints
@@ -418,7 +499,14 @@ async def search_area(
             abort_reason=f"Drone type '{drone.type.value}' does not support thermal scanning.",
         )
 
-    waypoints = _snake_waypoints(x1, y1, x2, y2, step)
+    all_waypoints = _snake_waypoints(x1, y1, x2, y2, step, start_x=drone.x, start_y=drone.y)
+    # Query backend once for covered buckets — survives drone disconnect/reconnect
+    covered_buckets = await _fetch_covered_buckets()
+    waypoints = [(wx, wy) for wx, wy in all_waypoints if _bucket(wx, wy) not in covered_buckets]
+    logger.info(
+        "search_area: %s — %d/%d waypoints uncovered (skipping %d already scanned)",
+        drone.id, len(waypoints), len(all_waypoints), len(all_waypoints) - len(waypoints),
+    )
     all_temps: dict[tuple[int, int], float] = {}
     all_detections: dict[tuple[int, int], SurvivorSignal] = {}
     visited = 0
@@ -426,6 +514,27 @@ async def search_area(
     for wx, wy in waypoints:
         if drone.battery_critical:
             logger.warning("search_area: aborting — battery critical (%.1f%%)", drone.battery)
+            break
+
+        # 1. Can we return from our CURRENT position?
+        #    Check this first — if we can't make it home from here, abort immediately.
+        current_return_cost = _manhattan(drone.x, drone.y, BASE_X, BASE_Y) * BATTERY_DRAIN_PER_CELL
+        if drone.battery - current_return_cost < BATTERY_CRITICAL_THRESHOLD:
+            logger.warning(
+                "search_area: aborting — cannot safely return from current position (%d,%d) "
+                "(battery=%.1f%%, return_cost=%.1f%%)", drone.x, drone.y, drone.battery, current_return_cost,
+            )
+            break
+
+        # 2. Can we reach the NEXT waypoint, scan, and still return from there?
+        move_cost = _manhattan(drone.x, drone.y, wx, wy) * BATTERY_DRAIN_PER_CELL
+        return_cost = _manhattan(wx, wy, BASE_X, BASE_Y) * BATTERY_DRAIN_PER_CELL
+        projected = drone.battery - move_cost - BATTERY_DRAIN_SCAN - return_cost
+        if projected < BATTERY_CRITICAL_THRESHOLD:
+            logger.warning(
+                "search_area: aborting — not enough battery to reach (%d,%d) and return "
+                "(projected %.1f%% < threshold %.1f%%)", wx, wy, projected, BATTERY_CRITICAL_THRESHOLD,
+            )
             break
 
         # Move to waypoint — streams position updates via on_waypoint
@@ -437,9 +546,10 @@ async def search_area(
         if drone.battery_critical:
             break
 
-        # Scan at this waypoint
+        # Scan at this waypoint and report to backend coverage grid
         scan_result = await thermal_scan(drone, scan_radius)
         visited += 1
+        asyncio.create_task(_report_covered(wx, wy))
 
         # Merge raw readings (keep highest temp per cell)
         for r in scan_result.raw_readings:

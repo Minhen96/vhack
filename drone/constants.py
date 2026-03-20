@@ -7,5 +7,10 @@ BATTERY_CHARGE_RATE: float = 5.0   # % per second while charging at base (100/10
 SCAN_RADIUS_DEFAULT: int = 8
 DRONE_FOV: float = 60.0             # camera field of view in degrees
 BASE_X: int = 0
-BASE_Y: int = 0
+BASE_Y: int = 40  # base station is at the north edge of the map (matches sim server BaseY)
 BASE_Z: int = 10  # drone hovers at altitude 10 when idle at base
+
+MAP_X_MIN: int = -40
+MAP_X_MAX: int = 40
+MAP_Y_MIN: int = -40
+MAP_Y_MAX: int = 40

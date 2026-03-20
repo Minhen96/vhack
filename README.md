@@ -75,18 +75,24 @@ cd vhack
 ### 2. Python virtual environment
 
 ```bash
-# Create and activate venv
+# Create venv
 python -m venv .venv
 
-# Linux / macOS
+# Activate — Linux / macOS
 source .venv/bin/activate
 
-# Windows (PowerShell)
+# Activate — Windows (PowerShell)
 .venv\Scripts\Activate.ps1
 
-# Windows (cmd)
+# Activate — Windows (cmd)
 .venv\Scripts\activate.bat
+```
 
+> **Gemini / Anthropic users:** before installing, uncomment the relevant line in `requirements.txt`:
+> - Gemini → `langchain-google-genai>=2.0.0`
+> - Anthropic → `langchain-anthropic>=0.3.0`
+
+```bash
 # Install all Python dependencies
 pip install -r requirements.txt
 ```

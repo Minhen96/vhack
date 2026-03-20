@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from backend.core.drone_registry import registry
+from backend.events import push as push_event
 from backend.models.drone import DroneCapability, DroneState, DroneStatus
 
 router = APIRouter(tags=["drone-registry", "map"])
@@ -66,7 +67,7 @@ def get_map_drones() -> list[dict]:
 
 
 @router.post("/register")
-def register_drone(req: RegisterRequest) -> dict:
+async def register_drone(req: RegisterRequest) -> dict:
     """
     Register a drone with the MCP server.
 
@@ -109,6 +110,15 @@ def register_drone(req: RegisterRequest) -> dict:
         port=req.port,
     )
     registry.register(drone)
+
+    # Notify the LLM agent that a new drone has joined the fleet mid-mission
+    await push_event({
+        "type": "drone_joined",
+        "drone_id": req.drone_id,
+        "drone_type": req.type,
+        "capabilities": req.capabilities,
+    })
+
     return {
         "success": True,
         "drone_id": req.drone_id,
@@ -122,7 +132,7 @@ def register_drone(req: RegisterRequest) -> dict:
 
 
 @router.post("/deregister")
-def deregister_drone(req: DeregisterRequest) -> dict:
+async def deregister_drone(req: DeregisterRequest) -> dict:
     """
     Deregister a drone from the MCP server.
 
@@ -136,6 +146,13 @@ def deregister_drone(req: DeregisterRequest) -> dict:
             "drone_id": req.drone_id,
             "message": f"Drone '{req.drone_id}' was not registered.",
         }
+
+    # Notify the LLM agent that this drone has left the fleet
+    await push_event({
+        "type": "drone_left",
+        "drone_id": req.drone_id,
+    })
+
     return {
         "success": True,
         "drone_id": req.drone_id,

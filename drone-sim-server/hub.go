@@ -52,7 +52,7 @@ const (
 
 const (
 	BaseX = 0.0
-	BaseY = 50.0
+	BaseY = 40.0
 )
 
 // =============================================================================
@@ -456,8 +456,9 @@ func (h *Hub) registerClient(client *Client) {
 	}
 }
 
-// unregisterClient removes a client and cleans up
-// Uses channel-based unregistration - no mutex locks
+// unregisterClient removes a client and cleans up.
+// Safe to call multiple times — only the first call for a given client
+// does real work; subsequent calls are no-ops (client already removed from map).
 func (h *Hub) unregisterClient(client *Client) {
 	// Signal the client to stop its pumps
 	close(client.quit)
@@ -469,7 +470,9 @@ func (h *Hub) unregisterClient(client *Client) {
 			delete(h.DroneClients, client)
 			h.mu.Unlock()
 
-			// Close channels
+			// Signal pumps to stop, then close data channels.
+			// Done inside the existence-check so we never close twice.
+			close(client.quit)
 			close(client.Send)
 
 			// Remove from global drone state
@@ -480,6 +483,7 @@ func (h *Hub) unregisterClient(client *Client) {
 			log.Printf("🛑 Drone client unregistered: %s", client.DroneID)
 		} else {
 			h.mu.Unlock()
+			// Already unregistered — ignore duplicate call
 		}
 
 	case UIClient:
@@ -488,12 +492,73 @@ func (h *Hub) unregisterClient(client *Client) {
 			delete(h.UIClients, client)
 			h.mu.Unlock()
 
-			// Close channels
+			// Signal pumps to stop, then close data channels.
+			close(client.quit)
 			close(client.Send)
 
 			log.Printf("🖥️  UI client unregistered")
 		} else {
 			h.mu.Unlock()
+		}
+	}
+}
+
+// droneMessageListener listens to a drone client's receive channel
+// and routes messages to the hub's DroneMessages channel
+// This is the ReadPump → Hub routing: WS → Receive → Hub
+func (h *Hub) droneMessageListener(client *Client) {
+	defer func() {
+		// Signal hub to unregister this client
+		h.Unregister <- client
+	}()
+
+	for {
+		select {
+		case message, ok := <-client.Receive:
+			if !ok {
+				// Channel closed, client disconnected
+				return
+			}
+			// Route to hub for processing
+			select {
+			case h.DroneMessages <- message:
+			default:
+				log.Printf("⚠️  DroneMessages channel full for %s", client.getClientIdentifier())
+			}
+
+		case <-client.quit:
+			// Received quit signal
+			return
+		}
+	}
+}
+
+// uiMessageListener listens to a UI client's receive channel
+// and routes messages to the hub's UIMessages channel
+// This is the ReadPump → Hub routing: WS → Receive → Hub
+func (h *Hub) uiMessageListener(client *Client) {
+	defer func() {
+		// Signal hub to unregister this client
+		h.Unregister <- client
+	}()
+
+	for {
+		select {
+		case message, ok := <-client.Receive:
+			if !ok {
+				// Channel closed, client disconnected
+				return
+			}
+			// Route to hub for processing
+			select {
+			case h.UIMessages <- message:
+			default:
+				log.Printf("⚠️  UIMessages channel full for %s", client.getClientIdentifier())
+			}
+
+		case <-client.quit:
+			// Received quit signal
+			return
 		}
 	}
 }
@@ -844,7 +909,7 @@ func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, fov flo
 		if dist3D > 0 {
 			angleFactor = droneZ / dist3D
 		}
-		apparent := s.Thermal * math.Exp(-dist3D*0.1) * angleFactor
+		apparent := s.Thermal * math.Exp(-dist3D*0.005) * angleFactor
 		noise := (rand.Float64() - 0.5) * 0.4
 		temp := math.Round((apparent+noise)*10) / 10
 		readings = append(readings, ThermalReading{X: s.X, Y: s.Z, TempCelsius: temp})
@@ -1028,10 +1093,12 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 			CommandBase: &CommandBase{
 				X: BaseX,
 				Y: BaseY,
+				Y: BaseY,
 			},
 		},
 		Position: Position{
 			X: BaseX,
+			Y: BaseY,
 			Y: BaseY,
 			Z: 10.0,
 		},

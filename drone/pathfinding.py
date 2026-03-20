@@ -7,6 +7,7 @@ def astar(
     start: tuple[int, int],
     goal: tuple[int, int],
     blocked: set[tuple[int, int]],
+    bounds: tuple[int, int, int, int] | None = None,
 ) -> list[tuple[int, int]]:
     """Find the shortest path from start to goal, avoiding blocked cells.
 
@@ -77,6 +78,10 @@ def astar(
         # Check all 4 neighbours (no diagonals)
         x, y = current
         for neighbor in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if bounds is not None:
+                nx, ny = neighbor
+                if not (bounds[0] <= nx <= bounds[2] and bounds[1] <= ny <= bounds[3]):
+                    continue              # outside map — skip
             if neighbor in blocked:
                 continue                  # wall — skip
 

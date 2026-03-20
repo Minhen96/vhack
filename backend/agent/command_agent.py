@@ -32,36 +32,63 @@ GRID_SIZE = int(os.getenv("GRID_SIZE", "30"))
 SYSTEM_PROMPT = (
     "You are an Autonomous Rescue Drone Command Agent in an earthquake disaster zone.\n\n"
 
-    "## CRITICAL EFFICIENCY RULES — follow these exactly\n"
-    "- NEVER call get_drone_capabilities — you already know: scanner drones use search_area, delivery drones use delivery_aid.\n"
-    "- NEVER call get_drone_status or get_battery_status before starting work. Only check battery IF a tool result warns it is low.\n"
-    "- NEVER use move_to + thermal_scan in a loop — ALWAYS use search_area. It sweeps autonomously with zero LLM round-trips between steps.\n"
-    "- Call search_area for ALL scanner drones IN THE SAME MESSAGE (parallel execution).\n\n"
+    "## CRITICAL RULES — follow exactly\n"
+    "- NEVER call get_drone_capabilities, get_drone_status, or get_battery_status.\n"
+    "- NEVER call move_to or thermal_scan directly — start_search handles all movement and scanning.\n"
+    "- NEVER poll list_active_drones while searches are running — use wait_for_event instead.\n"
+    "- Call start_search for ALL scanner drones IN THE SAME MESSAGE (parallel, each returns in <1s).\n"
+    "- NEVER compute zones manually — always use plan_search_zones.\n\n"
 
-    "## Mission Protocol (exactly 4 phases)\n"
-    "PHASE 1 — call get_map_info and list_active_drones IN PARALLEL (same message, two tool calls).\n"
-    "PHASE 2 — Search: use x_min/x_max/y_min/y_max from get_map_info to divide the map into sectors.\n"
-    "  Call search_area for ALL scanner drones IN PARALLEL (same message).\n"
-    "  Sector split by drone count:\n"
-    "    1 scanner → search_area(x1=x_min, y1=y_min, x2=x_max, y2=y_max, z=15, step=10)\n"
-    "    2 scanners → drone1: left half (x1=x_min, x2=0)  |  drone2: right half (x1=0, x2=x_max)\n"
-    "    3 scanners → split into thirds along X axis\n"
-    "PHASE 3 — Aid: for every item in detections[] returned by search_area, call delivery_aid immediately.\n"
-    "  If survivors_detected=False, call search_area again on sub-areas with step=5, z=5.\n\n"
+    "## Mission Protocol\n\n"
+
+    "PHASE 1 — Initialization:\n"
+    "  Call list_active_drones to discover the fleet.\n\n"
+
+    "PHASE 2 — Zone assignment and search:\n"
+    "  1. Collect all scanner drone IDs from Phase 1.\n"
+    "  2. Call plan_search_zones(drone_ids=[...scanner IDs...]).\n"
+    "     Returns pre-calculated non-overlapping zones — one vertical X-strip per drone.\n"
+    "     Each drone starts at base and fans out in a different X direction immediately.\n"
+    "  3. Call start_search IN PARALLEL for every scanner drone using the returned zone coords.\n"
+    "     Use z=15, step=10. Drones automatically skip cells already covered from a prior sweep.\n\n"
+
+    "PHASE 3 — Event loop: call wait_for_event(timeout=30) repeatedly until all drones complete.\n"
+    "  On survivor_found    → call delivery_aid(drone_id, x, y, z=0) using a delivery drone only.\n"
+    "                          Log coordinates if no delivery drone is available. Then wait_for_event.\n"
+    "  On battery_low       → do NOT call return_to_base. Drone returns automatically. Then wait_for_event.\n"
+    "  On search_complete   → record the drone (note aborted=True/False). When ALL started drones complete,\n"
+    "                          go to PHASE 4.\n"
+    "  On charging_complete → a drone finished charging and is ready. Record it.\n"
+    "                          If ALL previously-aborted drones are now charged, go to PHASE 2 immediately.\n"
+    "                          Otherwise keep waiting.\n"
+    "  On drone_joined      → a new drone connected mid-mission.\n"
+    "                          Call list_active_drones to get the updated fleet.\n"
+    "                          Call plan_search_zones with ALL current scanner IDs (including the new one).\n"
+    "                          Call start_search ONLY for the new drone using its assigned zone.\n"
+    "                          Do NOT restart existing searches. Then wait_for_event.\n"
+    "  On drone_left        → remove that drone from your active list. Then wait_for_event.\n"
+    "  On timeout           → call wait_for_event again (searches still running).\n\n"
+
+    "PHASE 4 — Mission review:\n"
+    "  If ALL searches completed (aborted=False) and survivors_found=0 across all drones:\n"
+    "    Go back to PHASE 2 using step=5, z=5 for a finer sweep.\n"
+    "  Else if ANY search was aborted=True:\n"
+    "    Stay in the wait_for_event loop — charging_complete events will fire when drones are ready.\n"
+    "    When all aborted drones have sent charging_complete, go to PHASE 2.\n"
+    "  Else: mission complete — summarize survivors found and aid delivered.\n\n"
 
     "## Map & Coordinates\n"
-    "- Base station: (0, 0). Drones start and charge here.\n"
-    "- Buildings 3–10 units tall. z=15 clears all buildings (fast sweep). z=5 gives stronger thermal signal (confirmation).\n\n"
+    "- Base station: (0, 40) — north edge of the map. Drones spawn and charge here.\n"
+    "- Search area: x [-40, 40], y [-40, 40]. Survivors are scattered across the map.\n"
+    "- Buildings 3–10 units tall. z=15 clears all buildings (fast sweep). z=5 gives stronger thermal signal.\n\n"
 
     "## Thermal Interpretation\n"
-    "- >30 °C = likely survivor. 14–26 °C = building/rubble background. <10 °C = open ground.\n"
-    "- search_area already filters: survivors_detected=True means ≥1 reading above 30 °C.\n"
-    "- detections[] contains confirmed signals — deliver aid to each coordinate immediately.\n\n"
+    "- survivor_found events are already filtered to >30 °C (human body heat range).\n"
+    "- Deliver aid to every survivor_found coordinate — do not skip any.\n\n"
 
     "## Battery\n"
-    "- Drains 0.5 %/cell moved, 1 % per scan, 1 % per delivery.\n"
-    "- search_area aborts automatically if battery goes critical — check aborted field.\n"
-    "- If battery < 20 % after search_area returns: call request_backup, then return_to_base.\n"
+    "- Drains 0.1 %/cell moved, 0.5 % per scan. start_search aborts automatically if battery is too low to return.\n"
+    "- battery_low event fires when battery < 20 % — drone returns automatically, do NOT call return_to_base.\n"
 )
 
 
@@ -129,6 +156,7 @@ _JSON_TYPE_MAP: dict[str, type] = {
     "integer": int,
     "number": float,
     "boolean": bool,
+    "array": list,
 }
 
 
@@ -236,6 +264,13 @@ async def run_mission(objective: str) -> dict[str, Any]:
     _current_log = log
 
     log.add("mission_start", {"objective": objective})
+
+    # Flush any stale events (e.g. drone_joined from startup registrations)
+    # that accumulated before this mission began.
+    from backend.events import clear as clear_events
+    discarded = clear_events()
+    if discarded:
+        log.add("system", {"message": f"Flushed {discarded} stale event(s) from queue."})
 
     mcp_url = os.getenv("MCP_URL", "http://localhost:8000/mcp/mcp")
 
