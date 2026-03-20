@@ -7,24 +7,42 @@ The Map Engine is the industrial-grade synchronization backbone of the RESCUE-AL
 
 ## Technical Architecture
 
-The engine utilizes a **Non-blocking I/O Hub** pattern inspired by high-frequency trading systems. It decouples message ingestion from broadcasting using Go channels and dropping-queue patterns to ensure zero-pressure telemetry—if a client (e.g., UI) falls behind, the hub drops stale frames rather than slowing down the real-time simulation.
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666', 'lineColor': '#888' }}}%%
-flowchart LR
-    D[Drone Swarm] -->|Ingest| H[Go Hub]
-    H -->|Queue| B{Broadcaster}
-    B -->|Fast Client| UI[Command Center]
-    B -->|Slow Client| X[Dropped Frame]
-    
-    style X color:#f00,stroke:#f00
-```
-
-### Key Features
-- **Concurrent Client Handling**: Supports separate pools for `Drones` and `UI` clients.
 - **Dropping Queue Pattern**: Uses `buffered channels` to prevent slow-client backpressure.
 - **Thermal Engine**: A multithreaded physics engine for processing temperature signatures.
 - **Occupancy Grid**: A centralized state of passable/blocked cells for drone pathfinding.
+
+---
+
+## Technical Architecture: The Hub
+
+The engine utilizes a **Non-blocking I/O Hub** pattern inspired by high-frequency trading systems. It decouples message ingestion from broadcasting using Go channels and dropping-queue patterns to ensure zero-pressure telemetry—if a client (e.g., UI) falls behind, the hub drops stale frames rather than slowing down the real-time simulation.
+
+### High-Frequency Message Processing
+RESCUE-ALPHA uses the `lxzan/gws` library for its high-performance WebSocket implementation, which provides:
+- **Zero-copy Upgrades**: Minimal memory allocation during handshake.
+- **Concurrent Writes**: Safe for high-throughput broadcasting across hundreds of clients.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666' }}}%%
+flowchart LR
+    D[Drone Swarm] -->|Ingest| H[Go Hub]
+    H -->|Queue| B{Broadcaster}
+    
+    subgraph Client_Pools [Client Pools]
+        B -->|Chan| U1[UI Client 1]
+        B -->|Chan| U2[UI Client 2]
+    end
+    
+    style B fill:#f9f,stroke:#333
+    U1 -.->|Drop if Full| Dropped[Dropped Frame]
+```
+
+### The Thermal Physics Engine
+The `/scan` endpoint performs localized ray-casting within the occupancy grid to simulate physical sensor behavior. 
+
+1. **Spatial Search**: Filters all survivors within a `SearchRadius` of the drone.
+2. **Angular Filter**: Checks if the survivor is within the camera's `Field of View` (FOV) relative to the drone's `Azimuth`.
+3. **Occlusion Check**: A custom **Bresenham-based Raycast** determines if there are high-altitude buildings (z >= 10) between the drone and the target heat signature.
 
 ---
 

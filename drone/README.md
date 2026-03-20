@@ -8,6 +8,20 @@ The Swarm consists of individual Python processes, each simulating a physical re
 ## Autonomous Simulation Logic
 
 Each drone process manages its own state machine, battery levels, and navigation. To ensure realism, the simulation includes:
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666', 'lineColor': '#888' }}}%%
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> NAVIGATING: /move received
+    NAVIGATING --> SEARCHING: /search received
+    NAVIGATING --> IDLE: target reached
+    SEARCHING --> RETURNING: battery < 5%
+    RETURNING --> CHARGING: at helipad
+    CHARGING --> IDLE: battery == 100%
+    SEARCHING --> IDLE: area complete
+```
+
 - **Atmospheric Physics**: Variable banking angles (roll) and damping during turns.
 - **Battery Management**: Dynamic power consumption based on flight distance and sensor load.
 - **Heterogeneous Capabilities**: Support for `Scanner` and `Delivery` unit types.
@@ -23,10 +37,31 @@ Each drone process manages its own state machine, battery levels, and navigation
 
 The drone uses the A* (A-star) algorithm to navigate complex rubble fields. Unlike static pathfinders, RESCUE-ALPHA drones **re-calculate the entire path every single cell movement**.
 
-### Implementation Details
-- **Heuristic**: Manhattan Distance (`|dx| + |dy|`).
-- **Dynamic Awareness**: Drones query the Map Engine's memory before every step to react to real-time grid updates (clearing rubble, etc.).
-- **Altitude Overflight**: If flight altitude `z >= 10` (max building height), the drone ignores all building obstacles and travels in a straight line for maximum power efficiency.
+### Algorithm & Heuristic
+The pathfinder minimizes the function $f(n) = g(n) + h(n)$, where:
+- **$g(n)$**: The actual cost from the start node to the current node $n$.
+- **$h(n)$**: The estimated cost (heuristic) from $n$ to the goal.
+
+RESCUE-ALPHA uses **Manhattan Distance** for $h(n)$ as it is computationally efficient for grid-based movement:
+$h(n) = |target\_x - current\_x| + |target\_y - current\_y|$
+
+### Dynamic Awareness & Re-planning
+1. **Grid Polling**: Before every cell transition, the drone polls the **Map Engine** for the latest `GridSnapshot`.
+2. **Obstacle Detection**: If a previously clear path is now blocked by falling rubble, the drone triggers an immediate re-calculation.
+3. **Altitude Overflight**: If flight altitude `z >= 10` (max building height), the drone ignores all building obstacles and travels in a straight line for maximum power efficiency.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666' }}}%%
+flowchart TD
+    S([Start Cell]) --> P[Poll Map Engine]
+    P --> C{Path Clear?}
+    C -- Yes --> M[Move 1 Cell]
+    C -- No --> R[A* Re-calculate]
+    R --> M
+    M --> G{Goal?}
+    G -- No --> P
+    G -- Yes --> E([Target Reached])
+```
 
 ---
 

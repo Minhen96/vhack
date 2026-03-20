@@ -13,29 +13,56 @@ The frontend is designed for **High-Frequency Telemetry Synchronization**. To ha
 - **React State (Zustand)**: Used for UI overlays, mission logs, and slow-changing metadata (battery %, status labels).
 - **Transient Refs**: Used for 3D object transformations (Position, Rotation, Scale). Components subscribe directly to the `dronesRef` to update Three.js matrices within the `useFrame` render loop, bypassing React's reconciliation for maximum GPU performance.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666' }}}%%
+flowchart TD
+    WS[WebSocket] --> Store[Zustand Store]
+    Store --> Ref[Mutate dronesRef Object]
+    
+    subgraph R3F_Loop [React Three Fiber Render Loop]
+        Ref --> UseFrame[useFrame Callback]
+        UseFrame --> Matrix[Update Object3D MatrixWorld]
+    end
+    
+    Store -.->|No Render| Component[React Component]
+```
+
 ---
 
 ## 3D Environment: Digital Twin
 
 The environment is a photorealistic reconstruction of an earthquake disaster zone.
 
-### Key Visual Components
-- **Photorealistic Terrain**: High-resolution ground plane featuring sunset lighting and dynamic dust particles.
-- **Structural Models**: Procedural building collision geometry and instanced "Rubble" debris.
-- **Thermal Heatmap Overlay**: A dynamic texture layer that accumulates thermal readings from the Swarm, rendered as an instanced mesh of colored tiles.
-- **Conical FOV Visualizer**: Real-time rendering of each drone's camera frustum, synchronized with the drone's 3D orientation.
+### Thermal Heatmap Generation
+Thermal data is rendered using **InstancedMesh** for high performance.
+1. **Data Ingestion**: Hub sends a `scan_heatmap` array of (x, y, temp).
+2. **Buffer Management**: The frontend maintains a `HeatmapRef` float32 array.
+3. **Color Mapping**: Temperatures are mapped to a custom HSL gradient (Cold Blue -> Hot Red).
+4. **Instanced Rendering**: A single draw call renders up to 10,000 thermal tiles simultaneously.
 
 ---
 
 ## Triple-View Camera System
 
-The `CameraController` provides three synchronized perspectives for comprehensive mission awareness.
+The `CameraController` provides three synchronized perspectives. It uses **Lerp (Linear Interpolation)** and **Slerp (Spherical Linear Interpolation)** for smooth transitions.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666' }}}%%
+flowchart LR
+    Target[Drone Position] --> Damping[Exponential Damping]
+    Damping --> Cam[Camera Matrix]
+    
+    subgraph Logic
+    L[Lerp: Position]
+    S[Slerp: Rotation]
+    end
+```
 
 | View Mode | Perspective | Description |
 |-----------|-------------|-------------|
-| **GLOBAL** | Orbit Controls | Free-form 3D navigation around the entire simulation volume. |
-| **FOLLOW** | 3rd-Person | High-damped spring-arm camera tracking a specific drone's trajectory. |
-| **PILOT** | FPV (Pilot) | Cockpit-view from the drone's perspective, locked to its local coordinate system for maximum immersion. |
+| **GLOBAL** | Orbit | Free-form exploration of the entire volume. |
+| **FOLLOW** | Track | Spring-arm camera tracking with high-damped look-at. |
+| **PILOT** | Cockpit | Locked-view with screen-jitter and atmospheric roll synchronization. |
 
 ---
 

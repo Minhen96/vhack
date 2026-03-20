@@ -40,6 +40,36 @@ sequenceDiagram
 
 The LLM agent follows a structured four-phase protocol to ensure maximum survival probability and power efficiency.
 
+### Sector Partitioning Algorithm
+To avoid collisions and ensure 100% coverage, the Commander implements a **Vertical Strip Partitioning** strategy.
+1. **Grid Analysis**: Retrieves the global map boundaries (e.g., -40 to 40).
+2. **Strip Calculation**: Divides the total width by the number of active drones ($W_{strip} = TotalWidth / N$).
+3. **Task Allocation**: Assigns each drone a unique $(x1, y1, x2, y2)$ bounding box.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666' }}}%%
+flowchart LR
+    A[Total Area] --> B{N Drones?}
+    B -->|N=2| D1[Strip 1: -40 to 0]
+    B -->|N=2| D2[Strip 2: 0 to 40]
+```
+
+### Mission Control: The Event Loop
+The agent is not a static script but a **Reactive Loop**. It uses a non-blocking queue to process incoming WebSocket events from the Map Engine via the MCP `wait_for_event` tool.
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666' }}}%%
+flowchart TD
+    Start([Start Mission]) --> Search[Dispatch start_search]
+    Search --> Wait[Call wait_for_event]
+    Wait --> Event{Event Type?}
+    Event -- survivor_found --> Aid[Task Delivery Drone]
+    Event -- battery_low --> Handoff[Request Backup]
+    Event -- timeout --> Search
+    Aid --> Wait
+    Handoff --> Wait
+```
+
 | Phase | Activity | Description |
 |-------|----------|-------------|
 | **1. Initialization** | Discovery | Calls `get_map_info` and `list_active_drones` to build a mental map of the disaster zone. |
