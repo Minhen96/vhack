@@ -84,9 +84,12 @@ export function Drone({ droneId }: DroneProps) {
     return unsubscribe;
   }, [droneId]);
 
-  // Ghost Drone Layers (assigned once)
+  // Ghost Drone Layers + Rotation Order (assigned once)
   useEffect(() => {
     if (visualGroupRef.current) {
+      // Match camera rotation order (YXZ = yaw first, then pitch)
+      // Without this, cone direction diverges from camera view when both azimuth & elevation are non-zero
+      visualGroupRef.current.rotation.order = 'YXZ';
       visualGroupRef.current.traverse((obj) => obj.layers.set(1));
     }
   }, []);
@@ -135,8 +138,8 @@ export function Drone({ droneId }: DroneProps) {
     while (azDiff < -Math.PI) azDiff += Math.PI * 2;
     visual.rotation.y += azDiff * Math.min(delta * SENSOR_CONFIG.DAMP_ROT_Y, 1);
     
-    const targetElevation = THREE.MathUtils.degToRad(spherical.elevation * SENSOR_CONFIG.ELEVATION_FACTOR);
-    visual.rotation.x = THREE.MathUtils.damp(visual.rotation.x, targetElevation, SENSOR_CONFIG.DAMP_ROT_X, delta);
+    // Body stays level — only roll (banking). Camera and cone handle elevation separately.
+    visual.rotation.x = 0;
     visual.rotation.z = currentRoll.current;
     
     // 4. STATIONARY HOVER
@@ -162,10 +165,20 @@ export function Drone({ droneId }: DroneProps) {
         spotlightRef.current.intensity = THREE.MathUtils.mapLinear(currentAlt, 5, 30, 100, 30);
       }
       if (coneRef.current) {
+        // rotation.x = PI/2 + elevationRad:
+        //   PI/2 alone  → cone opens in -Z (forward, horizon)
+        //   + elevation → tilts cone down by elevation angle (e.g. -PI/4 → forward-down 45°)
+        const elevationRad = THREE.MathUtils.degToRad(spherical.elevation * SENSOR_CONFIG.ELEVATION_FACTOR);
+        coneRef.current.rotation.x = Math.PI / 2 + elevationRad;
+
         const radius = Math.tan(fovRad / 2) * currentAlt;
         coneRef.current.scale.set(radius, currentAlt, radius);
-        coneRef.current.position.y = -currentAlt / 2;
-        coneRef.current.position.z = SENSOR_CONFIG.PIVOT_OFFSET[2]; 
+
+        // Place apex at drone nose. After Rx(PI/2+elRad) the apex's local coords are:
+        //   y = -(alt/2)*sin(elRad), z = (alt/2)*cos(elRad)
+        // Subtract those to land apex at (0, 0, PIVOT_OFFSET).
+        coneRef.current.position.y = (currentAlt / 2) * Math.sin(elevationRad);
+        coneRef.current.position.z = SENSOR_CONFIG.PIVOT_OFFSET[2] - (currentAlt / 2) * Math.cos(elevationRad);
       }
       lastVisualUpdate.current = { fov: currentFov, alt: currentAlt };
     }
@@ -250,7 +263,8 @@ export function Drone({ droneId }: DroneProps) {
         <mesh position={[0, 0, 0.7]}><sphereGeometry args={[0.1, 8, 8]} /><primitive object={materials.ledWhite} /></mesh>
         
         {/* SENSOR ARRAY: Tip at the Nose (Aligned with Pilot Camera) */}
-        <mesh ref={coneRef}>
+        {/* rotation.x=PI/2 reorients the cone from +Y (default up) to -Z (forward), matching camera look direction */}
+        <mesh ref={coneRef} rotation={[Math.PI / 2, 0, 0]}>
           <coneGeometry args={[1, 1, 32, 1, true]} />
           <primitive object={materials.sensorCone} />
         </mesh>

@@ -833,12 +833,27 @@ func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, elevati
 	droneXi := int(math.Round(droneX))
 	droneYi := int(math.Round(droneY))
 
+	// When the camera is tilted forward (elevation < 0), the footprint center is
+	// `droneZ / tan(-elevation)` units ahead horizontally. Extend the 2D radius to
+	// cover the full visible ground area; otherwise survivors in view are missed.
+	effectiveRadius := scanRadius
+	if elevation < 0 && droneZ > 0 {
+		elRad := elevation * math.Pi / 180
+		tanVal := math.Tan(-elRad)
+		if tanVal > 0.01 { // guard against near-horizontal cameras (huge reach)
+			forwardReach := droneZ / tanVal
+			if forwardReach > effectiveRadius {
+				effectiveRadius = forwardReach + scanRadius
+			}
+		}
+	}
+
 	SurvivorsMutex.RLock()
 	for _, s := range Survivors {
 		dx := s.X - droneX
 		dy := s.Z - droneY // Survivor.Z is the ground plane coordinate
 		dist2D := math.Sqrt(dx*dx + dy*dy)
-		if dist2D > scanRadius {
+		if dist2D > effectiveRadius {
 			continue
 		}
 		if !in3DCone(droneX, droneY, droneZ, s.X, s.Z, 0, azimuth, elevation, fov) {
@@ -865,7 +880,7 @@ func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, elevati
 		dx := b.X - droneX
 		dy := b.Y - droneY
 		dist2D := math.Sqrt(dx*dx + dy*dy)
-		if dist2D <= 0 || dist2D > scanRadius {
+		if dist2D <= 0 || dist2D > effectiveRadius {
 			continue
 		}
 		if !in3DCone(droneX, droneY, droneZ, b.X, b.Y, 0, azimuth, elevation, fov) {
