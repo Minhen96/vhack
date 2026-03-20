@@ -2,7 +2,13 @@ import { useRef, useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { subscribeToDronePosition, sendMessage, useStore } from './store';
+import { 
+  subscribeToDronePosition, 
+  sendMessage, 
+  useStore, 
+  registerDroneObject, 
+  unregisterDroneObject 
+} from './store';
 import { useViewStore } from './viewStore';
 import type { DroneState, DroneStatus, SphericalCoords } from './store';
 import { SENSOR_CONFIG } from './constants';
@@ -36,11 +42,12 @@ const hoverLabelStyle: React.CSSProperties = {
  * Optimized for performance and visual stability.
  */
 export function Drone({ droneId }: DroneProps) {
-  const groupRef = useRef<THREE.Group>(null);
+  const droneRootRef = useRef<THREE.Group>(null); // SOURCE OF TRUTH (Telemetry Root)
   const visualGroupRef = useRef<THREE.Group>(null);
   const spotlightRef = useRef<THREE.SpotLight>(null);
   const coneRef = useRef<THREE.Mesh>(null);
   const rotorRefs = useRef<THREE.Mesh[]>([]);
+  const spotlightTargetRef = useRef<THREE.Object3D>(null);
   
   // Store interaction
   const storeHoveredDroneId = useStore((state) => state.hoveredDroneId);
@@ -64,7 +71,6 @@ export function Drone({ droneId }: DroneProps) {
   const detectedSurvivors = useRef<Set<string>>(new Set());
   const lastVisualUpdate = useRef({ fov: -1, alt: -1, elevation: -999, roll: -999 });
   const lerpedFov = useRef(90);
-  const spotlightTargetRef = useRef<THREE.Object3D>(null);
 
   // Performance Optimization: Cache survivor meshes to avoid scene traversal
   const survivorMeshes = useMemo(() => {
@@ -83,6 +89,11 @@ export function Drone({ droneId }: DroneProps) {
 
   // Web Socket Subscription
   useEffect(() => {
+    // REGISTER THIS DRONE FOR THE CAMERA CONTROLLER
+    if (droneRootRef.current) {
+      registerDroneObject(droneId, droneRootRef.current);
+    }
+
     const unsubscribe = subscribeToDronePosition(droneId, (drone: DroneState | null) => {
       if (!drone) return;
       currentPos.current.set(drone.position.x, drone.position.y, drone.position.z);
@@ -95,14 +106,16 @@ export function Drone({ droneId }: DroneProps) {
       else if (drone.position.y < 8) droneStatus.current = 'RETURNING';
       else droneStatus.current = 'IDLE';
     });
-    return unsubscribe;
+
+    return () => {
+      unsubscribe();
+      unregisterDroneObject(droneId);
+    };
   }, [droneId]);
 
   // Ghost Drone Layers + Rotation Order (assigned once)
   useEffect(() => {
     if (visualGroupRef.current) {
-      // Match camera rotation order (YXZ = yaw first, then pitch)
-      // Without this, cone direction diverges from camera view when both azimuth & elevation are non-zero
       visualGroupRef.current.rotation.order = 'YXZ';
       visualGroupRef.current.traverse((obj) => obj.layers.set(1));
     }
@@ -122,66 +135,45 @@ export function Drone({ droneId }: DroneProps) {
   }), []);
 
   useFrame((state, delta) => {
-    if (!groupRef.current || !visualGroupRef.current) return;
+    if (!droneRootRef.current || !visualGroupRef.current) return;
     
-    const group = groupRef.current;
+    const root = droneRootRef.current;
     const visual = visualGroupRef.current;
     const time = state.clock.elapsedTime;
     
     // 1. POSITION DAMPING (Synced with Camera)
-    group.position.x = THREE.MathUtils.damp(group.position.x, currentPos.current.x, SENSOR_CONFIG.DAMP_POS, delta);
-    group.position.z = THREE.MathUtils.damp(group.position.z, currentPos.current.z, SENSOR_CONFIG.DAMP_POS, delta);
-    group.position.y = THREE.MathUtils.damp(group.position.y, currentPos.current.y, SENSOR_CONFIG.DAMP_POS, delta);
+    root.position.x = THREE.MathUtils.damp(root.position.x, currentPos.current.x, SENSOR_CONFIG.DAMP_POS, delta);
+    root.position.z = THREE.MathUtils.damp(root.position.z, currentPos.current.z, SENSOR_CONFIG.DAMP_POS, delta);
+    root.position.y = THREE.MathUtils.damp(root.position.y, currentPos.current.y, SENSOR_CONFIG.DAMP_POS, delta);
     
     // 2. BANKING PHYSICS
     const dx = currentPos.current.x - previousPos.current.x;
     const dz = currentPos.current.z - previousPos.current.z;
     const vel = Math.sqrt(dx * dx + dz * dz);
     
-    // Roll comes from backend telemetry (spherical.roll) — computed in move_to
-    // per step from azimuth change, same formula as before. Damp for smooth animation.
     const targetRollRad = THREE.MathUtils.degToRad(currentSpherical.current.roll ?? 0);
     currentRoll.current = THREE.MathUtils.damp(currentRoll.current, targetRollRad, SENSOR_CONFIG.DAMP_ROLL, delta);
     
-    // 3. ROTATION (Visual group only)
-    const spherical = currentSpherical.current;
-    
-    // Smooth Azimuth (Handle wrap)
-    let azDiff = targetAzimuth.current - visual.rotation.y;
+    // 3. ROTATION (Handle wrap on root group)
+    let azDiff = targetAzimuth.current - root.rotation.y;
     while (azDiff > Math.PI) azDiff -= Math.PI * 2;
     while (azDiff < -Math.PI) azDiff += Math.PI * 2;
-    visual.rotation.y += azDiff * Math.min(delta * SENSOR_CONFIG.DAMP_ROT_Y, 1);
+    root.rotation.y += azDiff * Math.min(delta * SENSOR_CONFIG.DAMP_ROT_Y, 1);
     
-    // Body stays level — only roll (banking). Camera and cone handle elevation separately.
-    visual.rotation.x = 0;
+    // Visual-only dampings
     visual.rotation.z = currentRoll.current;
+    visual.position.y = Math.sin(time * 2) * 0.05 * (1 - Math.min(vel * 10, 1));
     
-    // 4. STATIONARY HOVER
-    const osc = Math.sin(time * 2) * 0.05 * (1 - Math.min(vel * 10, 1));
-    visual.position.y = osc;
-    
-    previousPos.current.copy(group.position);
+    previousPos.current.copy(root.position);
 
-    // 5. THROTTLED VISUALS (FOV / ALTITUDE)
-    const currentAlt = group.position.y + 0.5;
+    // 4. THROTTLED VISUALS (FOV / ALTITUDE / ELEVATION)
+    const currentAlt = root.position.y + 0.5;
+    const spherical = currentSpherical.current;
     const targetFov = spherical.fov || 90;
     
-    // Smoothly transition FOV to match camera lerp
     lerpedFov.current = THREE.MathUtils.lerp(lerpedFov.current, targetFov, SENSOR_CONFIG.FOV_LERP);
     const currentFov = lerpedFov.current;
 
-    // Always sync cone rotation to current elevation every frame.
-    // Must be outside the throttle: when stationary the throttle doesn't fire,
-    // so without this the cone stays at whatever rotation was last set (often 0
-    // from the initial default before the first WebSocket update arrives).
-    const elevationRad = THREE.MathUtils.degToRad(spherical.elevation * SENSOR_CONFIG.ELEVATION_FACTOR);
-    if (coneRef.current) {
-      coneRef.current.rotation.x = Math.PI / 2 + elevationRad;
-    }
-
-    // Throttle check: update scale/position/spotlight only when significant changes occur.
-    // Roll must be included: when the visual group banks, cos(roll) < 1 reduces
-    // the effective vertical reach of the cone, lifting the base above ground.
     if (
       Math.abs(lastVisualUpdate.current.alt - currentAlt) > 0.05 ||
       Math.abs(lastVisualUpdate.current.fov - currentFov) > 0.1 ||
@@ -189,40 +181,46 @@ export function Drone({ droneId }: DroneProps) {
       Math.abs(lastVisualUpdate.current.roll - currentRoll.current) > 0.01
     ) {
       const fovRad = THREE.MathUtils.degToRad(currentFov);
-      if (spotlightRef.current) {
+      const elevationRad = THREE.MathUtils.degToRad(spherical.elevation * SENSOR_CONFIG.ELEVATION_FACTOR);
+
+      // 1. SPOTLIGHT DYNAMICS
+      if (spotlightRef.current && spotlightTargetRef.current) {
         spotlightRef.current.angle = fovRad / 2;
         spotlightRef.current.intensity = THREE.MathUtils.mapLinear(currentAlt, 5, 30, 100, 30);
+        
+        const targetDist = 20;
+        spotlightTargetRef.current.position.set(
+          0, 
+          targetDist * Math.sin(elevationRad), 
+          SENSOR_CONFIG.PIVOT_OFFSET[2] + targetDist * Math.cos(elevationRad)
+        );
       }
+
+      // 2. SENSOR CONE DYNAMICS
       if (coneRef.current) {
-        // A static large cone length ensures the base is always far enough to either
-        // fully penetrate the ground mesh (rendering a perfect elliptical intersection)
-        // or fade off into the sky. This eliminates the floating cutoff base issue.
-        // const coneLength = 300;
-
-        // Vertical drop of cone axis = cos(el) per unit length (after roll).
-        // Clamp cos(roll) ≥ 0.3 to prevent infinite length at extreme banking.
+        // FLIP: rotation.x = -PI/2 points the apex (+Y) BACKWARDS relative to the expansion.
+        coneRef.current.rotation.x = -Math.PI / 2 - elevationRad;
+        
+        const sinEl = Math.sin(elevationRad);
         const cosEl = Math.cos(elevationRad);
-        const cosRoll = Math.max(Math.cos(currentRoll.current), 0.3);
-        // Add 2 units below the ground plane (y = -0.5) so the cone visually
-        // penetrates the terrain rather than z-fighting at the exact ground edge.
-        const droneHeight = group.position.y + 0.5 + 2.0;
-        const coneLength = Math.abs(cosEl) > 0.05
-          ? Math.min(droneHeight / (Math.abs(cosEl) * cosRoll), droneHeight * 10)
-          : droneHeight * 2; // fallback for near-vertical cameras (el ≈ ±90°)
-
+        const droneHeight = root.position.y + 0.5;
+        const coneLength = Math.abs(sinEl) > 0.05 ? Math.min(droneHeight / Math.abs(sinEl), droneHeight * 10) : droneHeight * 2;
         const radius = Math.tan(fovRad / 2) * coneLength;
+        
         coneRef.current.scale.set(radius, coneLength, radius);
-
-        // Place apex at drone nose. After Rx(Math.PI/2 + elRad), apex local coords:
-        //   y = -(coneLength/2)*sin(elRad),  z = +(coneLength/2)*cos(elRad)
-        // Offset position so apex lands at (0, 0, PIVOT_OFFSET).
-        coneRef.current.position.y = (coneLength / 2) * Math.sin(elevationRad);
-        coneRef.current.position.z = SENSOR_CONFIG.PIVOT_OFFSET[2] - (coneLength / 2) * Math.cos(elevationRad);
+        
+        // Pivot around the nose
+        const centerOffset = coneLength / 2;
+        coneRef.current.position.set(
+          0,
+          SENSOR_CONFIG.PIVOT_OFFSET[1] + centerOffset * sinEl,
+          SENSOR_CONFIG.PIVOT_OFFSET[2] + centerOffset * cosEl
+        );
       }
       lastVisualUpdate.current = { fov: currentFov, alt: currentAlt, elevation: spherical.elevation, roll: currentRoll.current };
     }
 
-    // 6. SENSOR OPACITY PULSE
+    // 5. SENSOR OPACITY PULSE
     if (coneRef.current) {
       const targetOpacity = droneStatus.current === 'SCANNING' ? 0.05 + Math.abs(Math.sin(time * 3)) * 0.08 : 0.02;
       (coneRef.current.material as THREE.MeshBasicMaterial).opacity = THREE.MathUtils.lerp((coneRef.current.material as THREE.MeshBasicMaterial).opacity, targetOpacity, 0.1);
@@ -230,103 +228,97 @@ export function Drone({ droneId }: DroneProps) {
     
     rotorRefs.current.forEach((r) => r && (r.rotation.y += 0.8));
 
-    // 7. RAYCAST DETECTION (Optimized)
-    const now = state.clock.getElapsedTime();
-    if (now - lastDetectionTime.current >= 1.0 && currentAlt > 3) {
-      _raycaster.set(group.position, _downDir);
-      
-      // Use cached survivor meshes instead of traversing the whole scene
+    // 6. RAYCAST DETECTION
+    if (time - lastDetectionTime.current >= 1.0 && currentAlt > 3) {
+      _raycaster.set(root.position, _downDir);
       const intersects = _raycaster.intersectObjects(survivorMeshes, false);
-      
       for (const intersect of intersects) {
         if (intersect.distance <= spherical.scan_radius) {
           const sId = intersect.object.userData.survivorId || intersect.object.uuid;
-          
-          // O(1) lookup in transient ref
           if (!detectedSurvivors.current.has(sId)) {
             detectedSurvivors.current.add(sId);
             sendMessage({
-              type: 'survivor_detected',
-              drone_id: droneId,
-              survivor_id: sId,
-              x: intersect.object.position.x,
-              y: intersect.object.position.z, // Mapping Three.js Z to backend Y
-              z: intersect.object.position.y,
-              distance: intersect.distance,
-              scan_radius: spherical.scan_radius,
-              timestamp: Date.now(),
+              type: 'survivor_detected', drone_id: droneId, survivor_id: sId,
+              x: intersect.object.position.x, y: intersect.object.position.z, z: intersect.object.position.y,
+              distance: intersect.distance, scan_radius: spherical.scan_radius, timestamp: Date.now(),
             });
           }
         }
       }
-      lastDetectionTime.current = now;
+      lastDetectionTime.current = time;
     }
   });
 
   return (
-    <group ref={groupRef}>
-      {/* Interaction Hitbox (Invisible) */}
-      <mesh 
-        visible={false} 
-        onPointerOver={() => setStoreHoveredDroneId(droneId)}
-        onPointerOut={() => setStoreHoveredDroneId(null)}
-        onClick={() => {
-          if (selectedDroneId !== droneId) setFollowView(droneId);
-          else {
-            if (viewMode === 'FOLLOW') setPilotView(droneId);
-            else if (viewMode === 'PILOT') setGlobalView();
-            else setFollowView(droneId);
-          }
-        }}
-      >
-        <sphereGeometry args={[1.8]} />
-        <meshBasicMaterial transparent opacity={0} />
-      </mesh>
+    <group ref={droneRootRef}>
+      {/* 
+          MODEL AXIS NORMALIZATION: 
+          Outer group (droneRootRef) handles world-space telemetry.
+          Intermediate group (rotation PI) flips the model to align its nose (+Z) with Three.js Forward (-Z).
+      */}
+      <group rotation={[0, Math.PI, 0]}>
+        <group ref={visualGroupRef}>
+          {/* Interaction Hitbox (Invisible) */}
+          <mesh 
+            visible={false} 
+            onPointerOver={() => setStoreHoveredDroneId(droneId)} 
+            onPointerOut={() => setStoreHoveredDroneId(null)}
+            onClick={() => {
+              if (selectedDroneId !== droneId) setFollowView(droneId);
+              else {
+                if (viewMode === 'FOLLOW') setPilotView(droneId);
+                else if (viewMode === 'PILOT') setGlobalView();
+                else setFollowView(droneId);
+              }
+            }}
+          >
+            <sphereGeometry args={[1.8]} />
+            <meshBasicMaterial transparent opacity={0} />
+          </mesh>
 
-      {/* Visual Drone Body (Rotates) */}
-      <group ref={visualGroupRef}>
-        <mesh castShadow><boxGeometry args={[1.4, 0.25, 1.0]} /><primitive object={materials.body} /></mesh>
-        <mesh castShadow position={[0, 0.18, 0]}><cylinderGeometry args={[0.35, 0.5, 0.15, 16]} /><primitive object={materials.bodyTop} /></mesh>
-        <mesh castShadow position={[0, -0.15, 0]}><cylinderGeometry args={[0.25, 0.3, 0.1, 12]} /><primitive object={materials.body} /></mesh>
-        <mesh castShadow position={[0, 0, 0.55]}><boxGeometry args={[0.4, 0.12, 0.15]} /><primitive object={materials.carbonFiber} /></mesh>
-        
-        {/* Components */}
-        {[ [1.3,0,1.3], [-1.3,0,1.3], [1.3,0,-1.3], [-1.3,0,-1.3] ].map((pos, i) => (
-          <group key={i} position={pos as [number, number, number]}>
-            <mesh castShadow><cylinderGeometry args={[0.18, 0.15, 0.2, 12]} /><primitive object={materials.arm} /></mesh>
-            <mesh ref={(el) => { if (el) rotorRefs.current[i] = el; }} position={[0, 0.15, 0]}><cylinderGeometry args={[0.5, 0.5, 0.02, 2]} /><primitive object={materials.rotor} /></mesh>
-            <mesh rotation={[Math.PI/2, 0, 0]}><torusGeometry args={[0.55, 0.02, 8, 24]} /><primitive object={materials.arm} /></mesh>
+          {/* DRONE GEOMETRY: Nose is at +Z (local) */}
+          <group>
+            <mesh castShadow><boxGeometry args={[1.4, 0.25, 1.0]} /><primitive object={materials.body} /></mesh>
+            <mesh castShadow position={[0, 0.18, 0]}><cylinderGeometry args={[0.35, 0.5, 0.15, 16]} /><primitive object={materials.bodyTop} /></mesh>
+            <mesh castShadow position={[0, -0.15, 0]}><cylinderGeometry args={[0.25, 0.3, 0.1, 12]} /><primitive object={materials.body} /></mesh>
+            <mesh castShadow position={[0, 0, 0.55]}><boxGeometry args={[0.4, 0.12, 0.15]} /><primitive object={materials.carbonFiber} /></mesh>
+            
+            {[ [1.3,0,1.3], [-1.3,0,1.3], [1.3,0,-1.3], [-1.3,0,-1.3] ].map((pos, i) => (
+              <group key={i} position={pos as [number, number, number]}>
+                <mesh castShadow><cylinderGeometry args={[0.18, 0.15, 0.2, 12]} /><primitive object={materials.arm} /></mesh>
+                <mesh ref={(el) => { if (el) rotorRefs.current[i] = el; }} position={[0, 0.15, 0]}><cylinderGeometry args={[0.5, 0.5, 0.02, 2]} /><primitive object={materials.rotor} /></mesh>
+                <mesh rotation={[Math.PI/2, 0, 0]}><torusGeometry args={[0.55, 0.02, 8, 24]} /><primitive object={materials.arm} /></mesh>
+              </group>
+            ))}
+
+            <mesh position={[-0.7, 0, 0.5]}><sphereGeometry args={[0.1, 8, 8]} /><primitive object={materials.ledRed} /></mesh>
+            <mesh position={[0.7, 0, 0.5]}><sphereGeometry args={[0.1, 8, 8]} /><primitive object={materials.ledGreen} /></mesh>
+            <mesh position={[0, 0, 0.7]}><sphereGeometry args={[0.1, 8, 8]} /><primitive object={materials.ledWhite} /></mesh>
+            
+            {/* SENSOR ARRAY */}
+            <mesh ref={coneRef} rotation={[Math.PI / 2, 0, 0]}>
+              <coneGeometry args={[1, 1, 32, 1, true]} />
+              <primitive object={materials.sensorCone} />
+            </mesh>
+            
+            <object3D ref={spotlightTargetRef} position={[0, -10, SENSOR_CONFIG.PIVOT_OFFSET[2]]} />
+            <spotLight 
+              ref={spotlightRef} 
+              position={[0, -0.1, SENSOR_CONFIG.PIVOT_OFFSET[2]]} 
+              target={spotlightTargetRef.current || undefined}
+              penumbra={0.3} 
+              intensity={50} 
+              color="#ffffff" 
+              castShadow 
+            />
           </group>
-        ))}
-
-        {/* Navigation Lights */}
-        <mesh position={[-0.7, 0, 0.5]}><sphereGeometry args={[0.1, 8, 8]} /><primitive object={materials.ledRed} /></mesh>
-        <mesh position={[0.7, 0, 0.5]}><sphereGeometry args={[0.1, 8, 8]} /><primitive object={materials.ledGreen} /></mesh>
-        <mesh position={[0, 0, 0.7]}><sphereGeometry args={[0.1, 8, 8]} /><primitive object={materials.ledWhite} /></mesh>
-        
-        {/* SENSOR ARRAY: Tip at the Nose (Aligned with Pilot Camera) */}
-        <mesh ref={coneRef} rotation={[Math.PI / 2, 0, 0]}>
-          <coneGeometry args={[1, 1, 32, 1, true]} />
-          <primitive object={materials.sensorCone} />
-        </mesh>
-        
-        {/* Spotlight with dedicated target for precision (Nose-Aligned) */}
-        <object3D ref={spotlightTargetRef} position={[0, -10, SENSOR_CONFIG.PIVOT_OFFSET[2]]} />
-        <spotLight 
-          ref={spotlightRef} 
-          position={[0, -0.1, SENSOR_CONFIG.PIVOT_OFFSET[2]]} 
-          target={spotlightTargetRef.current || undefined}
-          penumbra={0.3} 
-          intensity={50} 
-          color="#ffffff" 
-          castShadow 
-        />
+        </group>
       </group>
 
-      {/* Static Interaction FX (Do Not Rotate) */}
+      {/* Hover FX */}
       <group>
-        {isHovered && groupRef.current && (
-          <mesh position={[0, -groupRef.current.position.y + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        {isHovered && droneRootRef.current && (
+          <mesh position={[0, -droneRootRef.current.position.y + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <ringGeometry args={[1.6, 2.2, 32]} />
             <meshBasicMaterial color="#ffcc00" transparent opacity={0.6} side={THREE.DoubleSide} />
           </mesh>
@@ -341,20 +333,10 @@ export function Drone({ droneId }: DroneProps) {
   );
 }
 
-/**
- * Drones Container - Optimized to only re-render when drone IDs change
- */
 export function Drones() {
   const droneIds = useStore((state) => Object.keys(state.drones).join(','));
   const ids = useMemo(() => droneIds.split(','), [droneIds]);
-
-  if (!droneIds) return null;
-
-  return (
-    <>
-      {ids.map((id) => (id ? <Drone key={id} droneId={id} /> : null))}
-    </>
-  );
+  return !droneIds ? null : <>{ids.map((id) => (id ? <Drone key={id} droneId={id} /> : null))}</>;
 }
 
 export default Drone;
