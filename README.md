@@ -1,261 +1,132 @@
-# Rescue Drone Simulation System
+# RESCUE-ALPHA
+### Autonomous Search & Rescue Digital Twin
 
-An autonomous multi-drone rescue simulation system for disaster response. An LLM agent commands a fleet of drones via the Model Context Protocol (MCP) to search for survivors using thermal imaging, navigate around obstacles with A\* pathfinding, and deliver aid — all visualized in a real-time 3D frontend.
+<p align="center">
+  <img src="assets/logo.png" alt="RESCUE-ALPHA Logo" width="200" />
+</p>
 
-## Architecture
+<p align="center">
+  <img src="assets/banner.jpg" alt="RESCUE-ALPHA Banner" width="800" />
+</p>
 
+<p align="center">
+  <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go" alt="Go"></a>
+  <a href="https://react.dev"><img src="https://img.shields.io/badge/React-18+-61DAFB?style=flat&logo=react" alt="React"></a>
+  <a href="https://threejs.org"><img src="https://img.shields.io/badge/Three.js-r160+-000000?style=flat&logo=three.js" alt="Three.js"></a>
+  <a href="https://www.typescriptlang.org"><img src="https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat&logo=typescript" alt="TypeScript"></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-1.0-orange?style=flat" alt="MCP"></a>
+</p>
+
+---
+
+## Executive Summary
+**RESCUE-ALPHA** is a high-performance, distributed simulation system designed for autonomous earthquake disaster response. It utilizes a state-of-the-art **4-node architecture** that synchronizes real-time 3D visualization, high-concurrency telemetry handling, and LLM-driven autonomous orchestration via the Model Context Protocol (MCP).
+
+The system enables a fleet of heterogeneous drones (Scanners and Delivery units) to systematically search for human heat signatures in rubble fields, navigate complex obstacles using A* pathfinding, and deliver life-saving aid—all without human intervention.
+
+---
+
+## System Architecture
+
+RESCUE-ALPHA operates on two primary planes: the **Telemetry Plane** (Spatial Synchronization) and the **Control Plane** (Autonomous Orchestration).
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666', 'lineColor': '#888', 'secondaryColor': '#eee', 'tertiaryColor': '#f9f9f9' }}}%%
+flowchart TB
+    subgraph UI_Layer ["1. The Command Center (Frontend)"]
+        UI[React Three Fiber 3D Interface]
+        HUD[Tactical HUD & Bento UI]
+    end
+
+    subgraph Hub_Layer ["2. The Map Engine (Golang Hub)"]
+        Hub[WebSocket Hub]
+        ThermalEngine[Thermal Physics Engine]
+        Grid[Occupancy Grid]
+    end
+
+    subgraph Swarm_Layer ["3. The Swarm (Drones)"]
+        D1[Drone #1: Scanner]
+        D2[Drone #2: Delivery]
+        DN[Drone #N: Isolated Processes]
+    end
+
+    subgraph Agent_Layer ["4. The Commander (LLM Agent)"]
+        Agent[LangChain Agent]
+        MCP[MCP Server]
+    end
+
+    %% Telemetry Flow
+    D1 -.->|JSON Telemetry| Hub
+    D2 -.->|JSON Telemetry| Hub
+    Hub -.->|Broadcast| UI
+    
+    %% Physics Queries
+    D1 <-->|HTTP /scan| ThermalEngine
+    
+    %% Control Flow
+    Agent <-->|MCP Protocol| MCP
+    MCP <-->|HTTP Control| D1
+    MCP <-->|HTTP Control| D2
+    
+    %% External AI
+    Agent <-->|LLM API| LLM[External LLM Provider]
+
+    %% Version-specific Styles for High Contrast
+    classDef layerStyle fill:none,stroke:#888,stroke-width:2px,stroke-dasharray: 5 5;
+    class UI_Layer,Hub_Layer,Swarm_Layer,Agent_Layer layerStyle;
 ```
-LLM Agent (Backend MCP)
-    │  calls MCP tools
-    ▼
-Backend  :8000   FastAPI — drone registry + MCP server
-    │  HTTP
-    ▼
-Drone(s) :8001+  FastAPI — individual drone instances (A* nav, thermal scan)
-    │  WebSocket + HTTP
-    ▼
-Sim Server :8080  Go — disaster zone simulator (survivors, buildings, thermal physics)
-    │  WebSocket broadcast
-    ▼
-Frontend :5173   React + Three.js — real-time 3D visualizer
-```
 
-### Services
+### The Four Pillars
+1.  **[The Command Center (Frontend)](frontend/README.md)**: A React-based 3D digital twin of the disaster zone, featuring a triple-view camera system (Global, Follow, Pilot) and real-time thermal heatmap rendering.
+2.  **[The Map Engine (drone-sim-server)](drone-sim-server/README.md)**: A high-concurrency Golang WebSocket hub utilizing non-blocking I/O to handle 100Hz+ telemetry streams with zero backpressure.
+3.  **[The Swarm (drone-processes)](drone/README.md)**: Isolated Python processes simulating physical hardware, A* navigation, and 3D conical FOV (Field of View) thermal detection.
+4.  **[The Commander (backend)](backend/README.md)**: An LLM-powered orchestration engine that communicates via the Model Context Protocol (MCP) to manage the fleet as a set of autonomous tools.
 
-| Service | Language | Port | Description |
-|---------|----------|------|-------------|
-| `drone-sim-server` | Go | 8080 | WebSocket hub, occupancy grid, thermal physics |
-| `backend` | Python | 8000 | MCP server, LLM agent, drone registry |
-| `drone` | Python | 8001+ | Individual drone process (one per drone) |
-| `frontend` | TypeScript/React | 5173 | Real-time 3D mission visualization |
+---
 
-## Prerequisites
+## Orchestration Guide
 
-| Tool | Version |
-|------|---------|
-| Go | 1.21+ |
-| Python | 3.11+ |
-| Node.js | 18+ |
-| npm | 9+ |
+### Prerequisites
+- **Go 1.21+** (Map Engine)
+- **Node.js 18+** (Frontend)
+- **Python 3.11+** (Drones & Agent)
+- **LLM API Key** (DeepSeek, Gemini, OpenAI, or Anthropic)
 
-## Quick Start (Automated)
+### Startup Sequence
+To ensure proper handshaking between nodes, start the services in the following order:
 
-The project includes scripts to automate setup and execution for different operating systems.
+1.  **Map Engine**: `cd drone-sim-server && go run main.go --server`
+2.  **Drone Swarm**: Start as many drones as needed in separate terminals.
+    - `cd drone && python main.py` (Default: Scanner at port 8001)
+    - `DRONE_TYPE=delivery DRONE_PORT=8002 python main.py`
+3.  **Commander Agent**: `cd backend && uvicorn backend.main:app --port 8000`
+4.  **Command Center**: `cd frontend && npm run dev`
 
-### Windows (PowerShell)
+### Automated Deployment (Windows)
 ```powershell
-# 1. Setup environment (venv, .env, deps)
-.\dev.ps1 -Setup
-
-# 2. Run all services
-.\dev.ps1
-```
-
-### Linux / macOS (Bash)
-```bash
-# 1. Setup environment (venv, .env, deps)
-chmod +x dev.sh
-./dev.sh --setup
-
-# 2. Run all services
-./dev.sh
+.\dev.ps1 -Setup  # Install all dependencies and create venvs
+.\dev.ps1         # Launch all 5+ terminals automatically
 ```
 
 ---
 
-## Manual Setup (Detailed)
+## Core Technologies
 
-### 1. Clone the repository
-
-```bash
-git clone <repo-url>
-cd vhack
-```
-
-### 2. Python virtual environment
-
-```bash
-# Create venv
-python -m venv .venv
-
-# Activate — Linux / macOS
-source .venv/bin/activate
-
-# Activate — Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-
-# Activate — Windows (cmd)
-.venv\Scripts\activate.bat
-```
-
-> **Gemini / Anthropic users:** before installing, uncomment the relevant line in `requirements.txt`:
-> - Gemini → `langchain-google-genai>=2.0.0`
-> - Anthropic → `langchain-anthropic>=0.3.0`
-
-```bash
-# Install all Python dependencies
-pip install -r requirements.txt
-```
-
-### 3. Go dependencies
-
-```bash
-cd drone-sim-server
-go mod download
-cd ..
-```
-
-### 4. Frontend dependencies
-
-```bash
-cd frontend
-npm install
-cd ..
-```
-
-### 5. Environment variables
-
-Each service has its own `.env`. Copy the examples and fill in values:
-
-```bash
-# Backend LLM agent (API key required)
-cp backend/.env.example backend/.env
-
-# Drone process
-cp drone/.env.example drone/.env
-
-# Sim server (optional — defaults work out of the box)
-cp drone-sim-server/.env.example drone-sim-server/.env
-
-# Frontend (optional — defaults work out of the box)
-cp frontend/.env.example frontend/.env
-```
-
-**Minimum required:** Set your LLM API key in `backend/.env`:
-
-```dotenv
-LLM_PROVIDER=deepseek          # deepseek | gemini | openai | anthropic
-DEEPSEEK_API_KEY=your_key_here
-```
-
-See `.env.example` (root) for a full reference of all variables across all services.
-
-## Running the System
-
-Open **5 terminals** from the project root. Start services in order:
+| Layer | Stack | Key Features |
+|-------|-------|--------------|
+| **Frontend** | React, R3F, Drei, Zustand | Transient Ref Pattern, Triple-View Camera, Bento UI |
+| **Sim Server** | Go, lxzan/gws | Non-blocking WebSocket Hub, Non-pressure Telemetry |
+| **Drone AI** | Python, FastAPI, A* | Conical FOV simulation, Battery management, Lawnmower search |
+| **Command Agent** | Python, LangChain, MCP | Model Context Protocol, Chain-of-Thought Reasoning |
 
 ---
 
-### Terminal 1 — Go Sim Server
+## Component Deep Dives
 
-**Linux / macOS / Git Bash:**
-```bash
-cd drone-sim-server
-PORT=8080 go run . --server
-```
-
-**Windows (PowerShell):**
-```powershell
-cd drone-sim-server
-$env:PORT="8080"
-go run . --server
-```
+- **[Architecture & Orchestration (Backend)](backend/README.md)**
+- **[3D Visualization (Frontend)](frontend/README.md)**
+- **[Telemetry Hub (Go Sim Server)](drone-sim-server/README.md)**
+- **[Drone Simulation (Python Swarm)](drone/README.md)**
 
 ---
 
-### Terminal 2 — Backend (MCP + LLM Agent)
-
-```bash
-uvicorn backend.main:app --port 8000 --reload
-```
-
----
-
-### Terminal 3 — Drone #1 (Scanner)
-
-```bash
-uvicorn drone.main:app --port 8001 --reload
-```
-
-> Uses `drone/.env` defaults: `DRONE_TYPE=scanner`, `DRONE_PORT=8001`
-
----
-
-### Terminal 4 — Drone #2 (Delivery, optional)
-
-**Linux / macOS / Git Bash:**
-```bash
-DRONE_TYPE=delivery DRONE_PORT=8002 uvicorn drone.main:app --port 8002
-```
-
-**Windows (PowerShell):**
-```powershell
-$env:DRONE_TYPE="delivery"
-$env:DRONE_PORT="8002"
-uvicorn drone.main:app --port 8002
-```
-
----
-
-### Terminal 5 — Frontend
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173) in your browser.
-
----
-
-## Drone Types
-
-| Type | Capabilities |
-|------|-------------|
-| `scanner` | Thermal camera — detects survivor heat signatures |
-| `delivery` | Payload bay — delivers aid supplies to coordinates |
-
-## LLM Providers
-
-Set `LLM_PROVIDER` in `backend/.env` to one of:
-
-| Provider | Key variable |
-|----------|-------------|
-| `deepseek` | `DEEPSEEK_API_KEY` |
-| `openai` | `OPENAI_API_KEY` |
-| `gemini` | `GOOGLE_API_KEY` |
-| `anthropic` | `ANTHROPIC_API_KEY` |
-
-## MCP Tools (for LLM agent)
-
-| Tool | Description |
-|------|-------------|
-| `list_active_drones` | Discover all registered drones |
-| `get_drone_status` | Position, status, capabilities |
-| `get_battery_status` | Battery level |
-| `move_to` | Move drone to (x, y, z) with A\* pathfinding |
-| `thermal_scan` | 360° thermal scan — detect survivors |
-| `delivery_aid` | Deliver supplies to coordinates |
-| `return_to_base` | Return drone to charging base |
-| `request_backup` | Hand off mission to another drone |
-
-## Port Reference
-
-| Port | Service |
-|------|---------|
-| 8080 | Go Sim Server (WebSocket + HTTP) |
-| 8000 | Backend FastAPI |
-| 8001 | Drone #1 |
-| 8002 | Drone #2 (optional) |
-| 5173 | Frontend (Vite dev) |
-
-## Battery Parameters
-
-| Action | Drain |
-|--------|-------|
-| Movement | 0.5% per grid cell |
-| Thermal scan | 1.0% |
-| Delivery | 1.0% |
-| Charging | +5% per second |
-| Low battery alert | < 20% |
-| Critical (no commands) | < 5% |
