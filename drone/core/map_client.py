@@ -5,10 +5,11 @@ import time
 
 import asyncio
 
+import httpx
 import websockets
 from websockets import WebSocketClientProtocol
 
-from drone.core.config import MAP_WS_URL
+from drone.core.config import MAP_WS_URL, SIM_SERVER_URL
 from drone.models.drone import Drone
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,9 @@ class MapEngineClient:
         # Drone reference stored on first send_init_connection so the receive loop
         # can re-announce the drone to Map Engine after a reconnect without needing it passed in.
         self._drone: Drone | None = None
+
+        # Cached map bounds and base position fetched from sim server on first call.
+        self._map_info: dict | None = None
 
     async def connect(self) -> None:
         try:
@@ -203,6 +207,29 @@ class MapEngineClient:
         picked up while flying are not lost.
         """
         return list(self._recent_heat)
+
+    async def fetch_map_info(self) -> dict:
+        """Return map bounds and base position from the sim server.
+
+        Fetched once on first call and cached for the lifetime of the process.
+        Falls back to hardcoded defaults if the sim server is unreachable.
+        """
+        if self._map_info is not None:
+            return self._map_info
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{SIM_SERVER_URL}/map-info", timeout=3.0)
+                self._map_info = resp.json()
+                logger.info("map_info loaded from sim server: %s", self._map_info)
+        except Exception:
+            from drone.constants import BASE_X, BASE_Y, MAP_X_MAX, MAP_X_MIN, MAP_Y_MAX, MAP_Y_MIN
+            self._map_info = {
+                "x_min": MAP_X_MIN, "x_max": MAP_X_MAX,
+                "y_min": MAP_Y_MIN, "y_max": MAP_Y_MAX,
+                "base_x": BASE_X, "base_y": BASE_Y,
+            }
+            logger.warning("Could not reach sim server for map-info — using hardcoded fallback.")
+        return self._map_info
 
     async def close(self) -> None:
         if self._listener_task:

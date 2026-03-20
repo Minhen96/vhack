@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
@@ -42,7 +43,8 @@ SYSTEM_PROMPT = (
     "## Mission Protocol\n\n"
 
     "PHASE 1 — Initialization:\n"
-    "  Call list_active_drones to discover the fleet.\n\n"
+    "  1. Call get_map_info to discover map bounds (x_min, x_max, y_min, y_max) and base position.\n"
+    "  2. Call list_active_drones to discover the fleet.\n\n"
 
     "PHASE 2 — Zone assignment and search:\n"
     "  1. Collect all scanner drone IDs from Phase 1.\n"
@@ -78,8 +80,8 @@ SYSTEM_PROMPT = (
     "  Else: mission complete — summarize survivors found and aid delivered.\n\n"
 
     "## Map & Coordinates\n"
-    "- Base station: (0, 40) — north edge of the map. Drones spawn and charge here.\n"
-    "- Search area: x [-40, 40], y [-40, 40]. Survivors are scattered across the map.\n"
+    "- Call get_map_info() first — it returns the live base position and search area bounds.\n"
+    "- Base is at the north edge of the map. Drones spawn and charge there.\n"
     "- Buildings 3–10 units tall. z=15 clears all buildings (fast sweep). z=5 gives stronger thermal signal.\n\n"
 
     "## Thermal Interpretation\n"
@@ -268,9 +270,12 @@ async def run_mission(objective: str) -> dict[str, Any]:
     # Flush any stale events (e.g. drone_joined from startup registrations)
     # that accumulated before this mission began.
     from backend.events import clear as clear_events
+    from backend.coverage import coverage
     discarded = clear_events()
     if discarded:
         log.add("system", {"message": f"Flushed {discarded} stale event(s) from queue."})
+    coverage.reset()
+    log.add("system", {"message": "Coverage grid reset for new mission."})
 
     mcp_url = os.getenv("MCP_URL", "http://localhost:8000/mcp/mcp")
 

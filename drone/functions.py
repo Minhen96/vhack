@@ -17,10 +17,6 @@ from drone.constants import (
     BATTERY_DRAIN_PER_CELL,
     BATTERY_DRAIN_SCAN,
     BATTERY_LOW_THRESHOLD,
-    MAP_X_MAX,
-    MAP_X_MIN,
-    MAP_Y_MAX,
-    MAP_Y_MIN,
     SCAN_RADIUS_DEFAULT,
 )
 from drone.core.config import MCP_URL, SIM_SERVER_URL
@@ -178,6 +174,9 @@ async def move_to(
     # Import here to avoid a top-level circular import (map_client imports drone models)
     from drone.core.map_client import map_client
 
+    info = await map_client.fetch_map_info()
+    map_bounds = (info["x_min"], info["y_min"], info["x_max"], info["y_max"])
+
     goal = (x, y)
     steps = 0
     start_z = drone.z
@@ -202,10 +201,9 @@ async def move_to(
         # Re-planning every step means the drone automatically reroutes mid-path.
         # Above max building height -> fly straight over everything
 
-        blocked = set() if drone.z > MAX_BUILDING_HEIGHT else map_client.get_blocked()
+        blocked = set() if drone.z >= MAX_BUILDING_HEIGHT else map_client.get_blocked()
 
-        path = astar((drone.x, drone.y), goal, blocked,
-                     bounds=(MAP_X_MIN, MAP_Y_MIN, MAP_X_MAX, MAP_Y_MAX))
+        path = astar((drone.x, drone.y), goal, blocked, bounds=map_bounds)
 
         if not path:
             # A* returned empty — goal is completely surrounded, no way through.
@@ -499,6 +497,11 @@ async def search_area(
             abort_reason=f"Drone type '{drone.type.value}' does not support thermal scanning.",
         )
 
+    from drone.core.map_client import map_client
+    info = await map_client.fetch_map_info()
+    _base_x = int(info.get("base_x", BASE_X))
+    _base_y = int(info.get("base_y", BASE_Y))
+
     all_waypoints = _snake_waypoints(x1, y1, x2, y2, step, start_x=drone.x, start_y=drone.y)
     # Query backend once for covered buckets — survives drone disconnect/reconnect
     covered_buckets = await _fetch_covered_buckets()
@@ -518,7 +521,7 @@ async def search_area(
 
         # 1. Can we return from our CURRENT position?
         #    Check this first — if we can't make it home from here, abort immediately.
-        current_return_cost = _manhattan(drone.x, drone.y, BASE_X, BASE_Y) * BATTERY_DRAIN_PER_CELL
+        current_return_cost = _manhattan(drone.x, drone.y, _base_x, _base_y) * BATTERY_DRAIN_PER_CELL
         if drone.battery - current_return_cost < BATTERY_CRITICAL_THRESHOLD:
             logger.warning(
                 "search_area: aborting — cannot safely return from current position (%d,%d) "
@@ -528,7 +531,7 @@ async def search_area(
 
         # 2. Can we reach the NEXT waypoint, scan, and still return from there?
         move_cost = _manhattan(drone.x, drone.y, wx, wy) * BATTERY_DRAIN_PER_CELL
-        return_cost = _manhattan(wx, wy, BASE_X, BASE_Y) * BATTERY_DRAIN_PER_CELL
+        return_cost = _manhattan(wx, wy, _base_x, _base_y) * BATTERY_DRAIN_PER_CELL
         projected = drone.battery - move_cost - BATTERY_DRAIN_SCAN - return_cost
         if projected < BATTERY_CRITICAL_THRESHOLD:
             logger.warning(
@@ -687,15 +690,20 @@ async def return_to_base(
             eta_seconds=0,
         )
 
+    from drone.core.map_client import map_client
+    info = await map_client.fetch_map_info()
+    _base_x = int(info.get("base_x", BASE_X))
+    _base_y = int(info.get("base_y", BASE_Y))
+
     # Manhattan distance to base computed upfront — used as eta estimate (Option A).
     # Actual A* path may be longer if obstacles force a detour, but "eta" implies
     # it is an estimate so this is acceptable and standard practice.
-    eta = _manhattan(drone.x, drone.y, BASE_X, BASE_Y)
+    eta = _manhattan(drone.x, drone.y, _base_x, _base_y)
 
     # Navigate home using A* — avoids obstacles same as move_to/deliver_aid.
     # RETURNING status is used so Map Engine shows the correct state during the trip home.
     move_result = await move_to(
-        drone, BASE_X, BASE_Y, BASE_Z,
+        drone, _base_x, _base_y, BASE_Z,
         on_waypoint=on_waypoint,
         moving_status=DroneStatus.RETURNING,
     )
@@ -726,7 +734,7 @@ async def return_to_base(
         drone_id=drone.id,
         success=True,
         status="arrived",
-        position=Position(x=BASE_X, y=BASE_Y, z=BASE_Z),
+        position=Position(x=_base_x, y=_base_y, z=BASE_Z),
         battery_pct=drone.battery,
         message=f"Drone at base. Charging at {BATTERY_CHARGE_RATE}%/s.",
         eta_seconds=eta,
