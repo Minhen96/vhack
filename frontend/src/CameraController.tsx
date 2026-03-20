@@ -1,10 +1,10 @@
 import { useRef, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { MapControls } from '@react-three/drei';
-import * as THREE from 'three';
 import { useViewStore } from './viewStore';
-import { getDroneRef } from './store';
+import { getDroneRef, getDroneObject } from './store';
 import { SENSOR_CONFIG } from './constants';
+import * as THREE from 'three';
 
 const INITIAL_CAMERA_POS = new THREE.Vector3(30, 25, 30);
 const INITIAL_CAMERA_TARGET = new THREE.Vector3(0, 0, 0);
@@ -37,6 +37,7 @@ export function CameraController() {
   const azimuthSmooth = useRef(0);
   const elevationSmooth = useRef(0);
   const cameraTargetPos = useRef(new THREE.Vector3());
+  const followAzimuthSmooth = useRef(0);
   
   useFrame((state, delta) => {
 
@@ -53,73 +54,81 @@ export function CameraController() {
     const drone = getDroneRef(selectedDroneId);
     if (!drone) return;
 
+    // Initialization trigger for smoothed azimuths
+    if (Math.abs(azimuthSmooth.current) < 0.001 && Math.abs(elevationSmooth.current) < 0.001) {
+       azimuthSmooth.current = THREE.MathUtils.degToRad(-drone.spherical.azimuth);
+       followAzimuthSmooth.current = azimuthSmooth.current;
+    }
+
     const dronePos = new THREE.Vector3(drone.position.x, drone.position.y, drone.position.z);
     
     if (viewMode === 'FOLLOW') {
-      camera.layers.enable(1); // Show drone in follow
+      camera.layers.enable(1); 
       if (camera instanceof THREE.PerspectiveCamera) {
         camera.near = 0.1;
         camera.updateProjectionMatrix();
       }
       
-      // FOLLOW (3rd Person): 5 units behind, 3 units above
-      // Calculate "behind" based on drone's azimuth
-      const azimuthRad = THREE.MathUtils.degToRad(drone.spherical.azimuth);
-      // Backend azimuth: 0=North(Z+), 90=East(X+). 
-      // Camera should be opposite to direction of travel
-      const offsetX = Math.sin(azimuthRad) * -7;
-      const offsetZ = Math.cos(azimuthRad) * -7;
-      
-      const idealPos = dronePos.clone().add(new THREE.Vector3(offsetX, 4, offsetZ));
-      const idealLookAt = dronePos.clone().add(new THREE.Vector3(0, 1, 0)); // Look slightly above center
+      // 1. GET DRONE WORLD OBJECT (telemetry root)
+      const droneObj = getDroneObject(selectedDroneId);
+      if (!droneObj) return;
 
-      // Smooth lag using lerp
-      camera.position.lerp(idealPos, 0.1);
+      // Pre-allocated vectors for performance
+      const _worldPos = new THREE.Vector3();
+      const _worldQuat = new THREE.Quaternion();
+      const _targetPos = new THREE.Vector3();
+      const _cameraOffset = new THREE.Vector3();
+
+      // 2. GET THE ROOT GROUP'S ABSOLUTE WORLD POSITION AND ROTATION
+      droneObj.getWorldPosition(_worldPos);
+      droneObj.getWorldQuaternion(_worldQuat);
+
+      // 3. DEFINE A STRICT, HARD-CODED OFFSET (Normalized)
+      // If -Z is Forward, then +Z is Behind.
+      const IDEAL_OFFSET = new THREE.Vector3(0, 3, 10);
       
-      // Use a proxy for lookAt to smooth it too
-      targetLookAt.current.lerp(idealLookAt, 0.1);
-      camera.lookAt(targetLookAt.current);
+      // 4. APPLY THE ROTATION TO OUR OFFSET
+      _cameraOffset.copy(IDEAL_OFFSET).applyQuaternion(_worldQuat);
+
+      // 5. CALCULATE FINAL POSITION AND LERP
+      _targetPos.copy(_worldPos).add(_cameraOffset);
+      camera.position.lerp(_targetPos, 0.1);
       
-      // Ensure FOV is standard
+      // 6. CAMERA LOOKS AT THE DRONE
+      camera.lookAt(_worldPos);
+      
+      // 7. DYNAMIC OPTICS
       if (camera instanceof THREE.PerspectiveCamera) {
-        camera.fov = THREE.MathUtils.lerp(camera.fov, 60, 0.1);
+        camera.fov = THREE.MathUtils.lerp(camera.fov, 65, 0.05);
         camera.updateProjectionMatrix();
       }
     } 
     else if (viewMode === 'PILOT') {
-      camera.layers.disable(1); // GHOST DRONE: Hide drone for its own FPV
+      camera.layers.disable(1); 
       if (camera instanceof THREE.PerspectiveCamera && camera.near !== 0.01) {
         camera.near = 0.01;
         camera.updateProjectionMatrix();
       }
 
-      // PILOT (1st Person): Located at the "Nose" of the drone for true FPV
-      // 1. DAMPED ROTATIONS (Shortest Path)
+      // PILOT (1st Person): Located at the "Nose" of the drone
+      // 1. DAMPED ROTATIONS
       const targetAzimuth = THREE.MathUtils.degToRad(-drone.spherical.azimuth);
       const targetElevation = THREE.MathUtils.degToRad(drone.spherical.elevation * SENSOR_CONFIG.ELEVATION_FACTOR);
       
-      // Horizontal Wrap Handling
       let azDiff = targetAzimuth - azimuthSmooth.current;
       while (azDiff > Math.PI) azDiff -= Math.PI * 2;
       while (azDiff < -Math.PI) azDiff += Math.PI * 2;
       azimuthSmooth.current += azDiff * Math.min(delta * SENSOR_CONFIG.DAMP_ROT_Y, 1);
       
-      // Vertical Smoothing
       elevationSmooth.current = THREE.MathUtils.damp(elevationSmooth.current, targetElevation, SENSOR_CONFIG.DAMP_ROT_X, delta);
 
-      // Determine Roll (Simulated banking derived from horizontal velocity)
-      // (This should match the drone's logic exactly for perfect parity)
-      // Note: We bypass manual roll for the pilot to keep the horizon stable 
-      // UNLESS the user wants absolute "in-cockpit" realism.
-      // For now, we align Azimuth and Elevation perfectly.
-
-      // 2. CONSTRUCT NOSE OFFSET (Full 3D Coupling)
-      // tip is at [0, 0, 0.7] in local space of visualGroupRef
+      // 2. CONSTRUCT NOSE OFFSET
+      // In normalized pipeline: Nose is at -Z (offset -0.7)
       tempEuler.current.set(elevationSmooth.current, azimuthSmooth.current, 0, 'YXZ');
       tempQuat.current.setFromEuler(tempEuler.current);
       
-      // Calculate nose in world space relative to drone center
-      noseOffset.current.set(0, 0, SENSOR_CONFIG.PIVOT_OFFSET[2]).applyQuaternion(tempQuat.current);
+      // Use NEGATIVE Z for the nose tip (matching -Z forward)
+      noseOffset.current.set(0, 0, -SENSOR_CONFIG.PIVOT_OFFSET[2]).applyQuaternion(tempQuat.current);
       
       // 3. HOVER OSCILLATION SYNC
       const vel = Math.sqrt(
@@ -128,13 +137,13 @@ export function CameraController() {
       );
       const osc = Math.sin(state.clock.elapsedTime * 2) * 0.05 * (1 - Math.min(vel * 10, 1));
 
-      // 4. DAMPED POSITION (World Space)
+      // 4. DAMPED POSITION
       cameraTargetPos.current.x = THREE.MathUtils.damp(cameraTargetPos.current.x, dronePos.x, SENSOR_CONFIG.DAMP_POS, delta);
       cameraTargetPos.current.z = THREE.MathUtils.damp(cameraTargetPos.current.z, dronePos.z, SENSOR_CONFIG.DAMP_POS, delta);
       cameraTargetPos.current.y = THREE.MathUtils.damp(cameraTargetPos.current.y, dronePos.y, SENSOR_CONFIG.DAMP_POS, delta);
       
       camera.position.copy(cameraTargetPos.current).add(noseOffset.current);
-      camera.position.y += osc; // Add hover sway
+      camera.position.y += osc;
       
       // 5. APPLY CAMERA ROTATION
       camera.rotation.order = 'YXZ';
@@ -152,7 +161,7 @@ export function CameraController() {
         }
       }
 
-      // 7. VIBRATION (Small high-freq noise)
+      // 7. VIBRATION
       camera.position.x += (Math.random() - 0.5) * SENSOR_CONFIG.VIBRATION_SHAKE;
       camera.position.y += (Math.random() - 0.5) * SENSOR_CONFIG.VIBRATION_SHAKE;
       camera.position.z += (Math.random() - 0.5) * SENSOR_CONFIG.VIBRATION_SHAKE;
