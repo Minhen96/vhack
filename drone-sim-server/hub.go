@@ -460,9 +460,6 @@ func (h *Hub) registerClient(client *Client) {
 // Safe to call multiple times — only the first call for a given client
 // does real work; subsequent calls are no-ops (client already removed from map).
 func (h *Hub) unregisterClient(client *Client) {
-	// Signal the client to stop its pumps
-	close(client.quit)
-
 	switch client.ClientType {
 	case DroneClient:
 		h.mu.Lock()
@@ -503,65 +500,6 @@ func (h *Hub) unregisterClient(client *Client) {
 	}
 }
 
-// droneMessageListener listens to a drone client's receive channel
-// and routes messages to the hub's DroneMessages channel
-// This is the ReadPump → Hub routing: WS → Receive → Hub
-func (h *Hub) droneMessageListener(client *Client) {
-	defer func() {
-		// Signal hub to unregister this client
-		h.Unregister <- client
-	}()
-
-	for {
-		select {
-		case message, ok := <-client.Receive:
-			if !ok {
-				// Channel closed, client disconnected
-				return
-			}
-			// Route to hub for processing
-			select {
-			case h.DroneMessages <- message:
-			default:
-				log.Printf("⚠️  DroneMessages channel full for %s", client.getClientIdentifier())
-			}
-
-		case <-client.quit:
-			// Received quit signal
-			return
-		}
-	}
-}
-
-// uiMessageListener listens to a UI client's receive channel
-// and routes messages to the hub's UIMessages channel
-// This is the ReadPump → Hub routing: WS → Receive → Hub
-func (h *Hub) uiMessageListener(client *Client) {
-	defer func() {
-		// Signal hub to unregister this client
-		h.Unregister <- client
-	}()
-
-	for {
-		select {
-		case message, ok := <-client.Receive:
-			if !ok {
-				// Channel closed, client disconnected
-				return
-			}
-			// Route to hub for processing
-			select {
-			case h.UIMessages <- message:
-			default:
-				log.Printf("⚠️  UIMessages channel full for %s", client.getClientIdentifier())
-			}
-
-		case <-client.quit:
-			// Received quit signal
-			return
-		}
-	}
-}
 
 // handleDroneMessage processes messages from drones (send_position, survivor_detected)
 func (h *Hub) handleDroneMessage(message []byte) {
@@ -843,23 +781,37 @@ func bresenhamLOS(x1, y1, x2, y2 int, droneZ float64) bool {
 	}
 }
 
-// inCone reports whether a target at (tx, ty) falls inside the drone's FOV cone.
-// Bearing uses the same convention as the drone's azimuth: atan2(dx, -dy) in degrees
-// (0° = south, 90° = east, clockwise). When fov >= 360 the check always passes —
-// used for full-circle active scans where direction doesn't matter.
-func inCone(droneX, droneY, tx, ty, azimuth, fov float64) bool {
+// in3DCone checks whether target (tx, ty, tz) falls inside the drone's 3D FOV cone.
+// azimuth: horizontal direction degrees, atan2(dx,-dy) convention (0=south, 90=east).
+// elevation: vertical tilt degrees (-90=straight down, 0=horizon, positive=up).
+// fov: full cone angle in degrees. fov>=360 always passes (full-circle passive scan).
+// Roll is not needed — a circular cone is symmetric around its axis.
+func in3DCone(droneX, droneY, droneZ, tx, ty, tz, azimuth, elevation, fov float64) bool {
 	if fov >= 360 {
 		return true
 	}
+	azRad := azimuth * math.Pi / 180
+	elRad := elevation * math.Pi / 180
+	// Camera direction unit vector
+	camX := math.Sin(azRad) * math.Cos(elRad)
+	camY := -math.Cos(azRad) * math.Cos(elRad)
+	camZ := math.Sin(elRad) // negative for downward elevation
+	// Vector from drone to target
 	dx := tx - droneX
 	dy := ty - droneY
-	bearing := math.Atan2(dx, -dy) * 180 / math.Pi
-	bearing = math.Mod(bearing+360, 360)
-	diff := math.Abs(bearing - azimuth)
-	if diff > 180 {
-		diff = 360 - diff
+	dz := tz - droneZ
+	dist := math.Sqrt(dx*dx + dy*dy + dz*dz)
+	if dist == 0 {
+		return true
 	}
-	return diff <= fov/2
+	dot := (dx*camX + dy*camY + dz*camZ) / dist
+	if dot > 1 {
+		dot = 1
+	}
+	if dot < -1 {
+		dot = -1
+	}
+	return math.Acos(dot)*180/math.Pi <= fov/2
 }
 
 // computeThermalReadings returns thermal readings visible from the drone's position.
@@ -875,15 +827,7 @@ func inCone(droneX, droneY, tx, ty, azimuth, fov float64) bool {
 // Altitude-scaled radius (passive cone scans only, fov < 360):
 //   ground_radius = droneZ × tan(fov/2) — the camera's actual ground footprint.
 //   effective_radius = min(commanded_radius, ground_radius).
-func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, fov float64) []ThermalReading {
-	// Altitude-scaled effective radius for cone scans (not full-circle active sweeps)
-	if fov < 360 && droneZ > 0 {
-		fovRad := fov * math.Pi / 180
-		groundRadius := droneZ * math.Tan(fovRad/2)
-		if groundRadius < scanRadius {
-			scanRadius = groundRadius
-		}
-	}
+func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, elevation, fov float64) []ThermalReading {
 
 	readings := []ThermalReading{}
 	droneXi := int(math.Round(droneX))
@@ -897,7 +841,7 @@ func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, fov flo
 		if dist2D > scanRadius {
 			continue
 		}
-		if !inCone(droneX, droneY, s.X, s.Z, azimuth, fov) {
+		if !in3DCone(droneX, droneY, droneZ, s.X, s.Z, 0, azimuth, elevation, fov) {
 			continue
 		}
 		if !bresenhamLOS(droneXi, droneYi, int(math.Round(s.X)), int(math.Round(s.Z)), droneZ) {
@@ -924,7 +868,7 @@ func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, fov flo
 		if dist2D <= 0 || dist2D > scanRadius {
 			continue
 		}
-		if !inCone(droneX, droneY, b.X, b.Y, azimuth, fov) {
+		if !in3DCone(droneX, droneY, droneZ, b.X, b.Y, 0, azimuth, elevation, fov) {
 			continue
 		}
 		// Buildings: skip LOS check when drone is above the building
@@ -965,14 +909,18 @@ func ScanHandler(w http.ResponseWriter, r *http.Request) {
 	scanRadius, _ := strconv.ParseFloat(q.Get("radius"), 64)
 	azimuth, _ := strconv.ParseFloat(q.Get("azimuth"), 64)
 	fov, _ := strconv.ParseFloat(q.Get("fov"), 64)
+	elevation, _ := strconv.ParseFloat(q.Get("elevation"), 64)
 	if scanRadius <= 0 {
 		scanRadius = DefaultScanRadius
 	}
 	if fov <= 0 {
 		fov = 360 // no fov param = full-circle active scan
 	}
+	if q.Get("elevation") == "" {
+		elevation = -90.0 // default straight down for backward compatibility
+	}
 
-	readings := computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, fov)
+	readings := computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, elevation, fov)
 	json.NewEncoder(w).Encode(readings)
 }
 
@@ -1093,12 +1041,10 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 			CommandBase: &CommandBase{
 				X: BaseX,
 				Y: BaseY,
-				Y: BaseY,
 			},
 		},
 		Position: Position{
 			X: BaseX,
-			Y: BaseY,
 			Y: BaseY,
 			Z: 10.0,
 		},

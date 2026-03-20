@@ -57,7 +57,8 @@ class Drone:
     # scan_radius: how many grid cells the drone can sense — used by map engine to draw FOV cone
     # fov:         camera lens angle in degrees — configurable via DRONE_FOV in constants.py
     azimuth: float = 0.0
-    elevation: float = -90.0
+    elevation: float = -45.0
+    roll: float = 0.0
     scan_radius: int = SCAN_RADIUS_DEFAULT
     fov: float = DRONE_FOV
 
@@ -82,6 +83,7 @@ class Drone:
         return {
             "azimuth": self.azimuth,
             "elevation": self.elevation,
+            "roll": self.roll,
             "scan_radius": self.scan_radius,
             "fov": self.fov,
         }

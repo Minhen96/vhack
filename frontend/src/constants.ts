@@ -9,7 +9,7 @@ export const SENSOR_CONFIG = {
   PIVOT_OFFSET: [0, 0, 0.7] as [number, number, number],
   
   // Multipliers
-  ELEVATION_FACTOR: 0.5, // 50% pitch relative to telemetry
+  ELEVATION_FACTOR: 1.0, // 100% pitch — matches backend elevation exactly
   
   // Damping Factors (Higher = More Responsive)
   DAMP_POS: 5.0,

@@ -2,24 +2,21 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useStore } from '../../store';
 import { useViewStore } from '../../viewStore';
-import { 
-  Rocket, 
-  Map, 
-  BellOff, 
+import {
+  Map,
+  BellOff,
   Bell,
   Navigation,
   Anchor,
-  Terminal
+  Terminal,
+  CirclePlay,
+  Crosshair
 } from 'lucide-react';
 
 export const CommandDock: React.FC = () => {
   const { missionRunning, setMissionRunning } = useStore();
-  const { setTerminalOpen } = useViewStore();
+  const { setTerminalOpen, triggerResetView } = useViewStore();
   const [muted, setMuted] = React.useState(false);
-
-  const handleDeploy = async () => {
-    setMissionRunning(true);
-  };
 
   const handleRecall = async () => {
     if (confirm('Initiate emergency fleet recall to base?')) {
@@ -52,15 +49,27 @@ export const CommandDock: React.FC = () => {
           <div className="w-[1px] h-4 bg-white/5 mx-1" />
 
           <button
-            onClick={handleDeploy}
+            onClick={() => !missionRunning && setTerminalOpen(true)}
+            disabled={missionRunning}
             className={`
-              flex items-center gap-2 px-4 py-2 rounded-full transition-all active:scale-95
-              ${missionRunning ? 'bg-mission-accent/20 text-mission-accent border border-mission-accent/20' : 'hover:bg-white/10 text-white/60'}
+              flex items-center gap-2 px-5 py-2 rounded-full transition-all active:scale-95 font-bold
+              ${missionRunning
+                ? 'bg-mission-accent/20 text-mission-accent border border-mission-accent/30 cursor-not-allowed'
+                : 'bg-mission-accent text-black hover:brightness-110 shadow-[0_0_20px_rgba(34,211,238,0.35)]'}
             `}
-            title="Deploy All Drones [Action-1]"
+            title="Start Mission [/]"
           >
-            <Rocket size={16} />
-            <span className="text-[10px] font-bold uppercase tracking-wider">Deploy</span>
+            {missionRunning ? (
+              <>
+                <div className="w-2 h-2 rounded-full bg-mission-accent animate-ping" />
+                <span className="text-[10px] uppercase tracking-wider">Mission Active</span>
+              </>
+            ) : (
+              <>
+                <CirclePlay size={16} />
+                <span className="text-[10px] uppercase tracking-wider">Start Mission</span>
+              </>
+            )}
           </button>
 
           <button
@@ -73,6 +82,14 @@ export const CommandDock: React.FC = () => {
           </button>
 
           <div className="w-[1px] h-6 bg-white/5 mx-1" />
+
+          <button
+            onClick={triggerResetView}
+            className="p-2 rounded-full hover:bg-white/10 text-white/40 hover:text-white transition-all"
+            title="Reset View to Center [Home]"
+          >
+            <Crosshair size={18} />
+          </button>
 
           <button
             className="p-2 rounded-full hover:bg-white/10 text-white/40 hover:text-white transition-all"

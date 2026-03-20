@@ -38,6 +38,7 @@ from drone.pathfinding import astar
 logger = logging.getLogger(__name__)
 
 _BUCKET_SIZE = SCAN_RADIUS_DEFAULT  # must match backend/coverage.py BUCKET_SIZE
+_MAX_ROLL_DEG = 22.5  # max bank angle in degrees (matches frontend PI/8)
 
 
 async def _fetch_covered_buckets() -> set[tuple[int, int]]:
@@ -226,10 +227,18 @@ async def move_to(
         step_dist = _manhattan(drone.x, drone.y, wx, wy)
         _drain(drone, step_dist * BATTERY_DRAIN_PER_CELL)
 
-        # Update azimuth to face the direction of travel
+        # Update azimuth and roll to face the direction of travel
         dx, dy = wx - drone.x, wy - drone.y
         if dx != 0 or dy != 0:
+            prev_az = drone.azimuth
             drone.azimuth = math.degrees(math.atan2(dx, -dy)) % 360
+            az_diff = drone.azimuth - prev_az
+            if az_diff > 180: az_diff -= 360
+            if az_diff < -180: az_diff += 360
+            target_roll = -math.copysign(_MAX_ROLL_DEG, az_diff) if abs(az_diff) > 0.01 else 0.0
+        else:
+            target_roll = 0.0
+        drone.roll = round(drone.roll + (target_roll - drone.roll) * 0.3, 2)
 
         drone.x, drone.y = wx, wy
 
@@ -301,7 +310,8 @@ async def passive_waypoint_scan(
                     "z": drone.z,
                     "radius": radius,
                     "azimuth": drone.azimuth,
-                    "fov": 360,   # full circle — scan everything below, not just forward arc
+                    "elevation": drone.elevation,
+                    "fov": drone.fov,
                 },
                 timeout=3.0,
             )
@@ -314,10 +324,17 @@ async def passive_waypoint_scan(
                     temp = r.get("temp_celsius", 0.0)
                     if 30 < temp < 42:
                         await on_survivor(int(round(r["x"])), int(round(r["y"])), temp)
-        # Mark current position as covered — passive scan fires at every movement
-        # cell (step=1) with radius=8 fov=360, so the flight path is fully scanned.
-        # This prevents the next charge cycle from re-scanning the same ground.
-        asyncio.create_task(_report_covered(drone.x, drone.y))
+        # Mark camera footprint center as covered (not drone position).
+        # For elevation=-45° at altitude z: footprint center is z units ahead in azimuth direction.
+        el_rad = math.radians(drone.elevation)
+        az_rad = math.radians(drone.azimuth)
+        if el_rad < 0 and drone.z > 0:
+            h_dist = drone.z / math.tan(-el_rad)
+            fpx = round(drone.x + h_dist * math.sin(az_rad))
+            fpy = round(drone.y - h_dist * math.cos(az_rad))
+        else:
+            fpx, fpy = drone.x, drone.y
+        asyncio.create_task(_report_covered(fpx, fpy))
     except Exception:
         pass  # silent — passive scan failure must never disrupt movement
 
@@ -358,16 +375,17 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
 
     all_temps: dict[tuple[int, int], float] = {}
 
-    # Rotation sweep: drone rotates 360 degrees in steps equal to its FOV.
-    # At each angle the camera scans what is in its forward cone, then the drone
-    # rotates to the next angle. Full circle = num_steps * fov_per_step >= 360.
-    # send_position at each step so the UI shows the drone physically spinning.
-    num_steps = math.ceil(360 / drone.fov)
-    step_angle = 360 / num_steps
+    # Forward 180° sweep: passive_waypoint_scan already covered the rear hemisphere
+    # (it fires fov=360 at every movement cell, so everything behind is scanned).
+    # We only need the forward arc — centered on current heading, ±90° each side.
+    # With FOV=60°: 3 steps × 60° = 180° total coverage.
     original_azimuth = drone.azimuth
+    num_steps = math.ceil(180 / drone.fov)
+    step_angle = drone.fov
+    start_azimuth = original_azimuth - (num_steps - 1) / 2 * step_angle
 
     for i in range(num_steps):
-        drone.azimuth = (i * step_angle) % 360
+        drone.azimuth = (start_azimuth + i * step_angle) % 360
         await map_client.send_position(drone, 0)
         try:
             async with httpx.AsyncClient() as client:
@@ -379,6 +397,7 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
                         "z": drone.z,
                         "radius": radius,
                         "azimuth": drone.azimuth,
+                        "elevation": drone.elevation,
                         "fov": drone.fov,
                     },
                     timeout=5.0,

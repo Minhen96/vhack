@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { MapControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -6,13 +6,27 @@ import { useViewStore } from './viewStore';
 import { getDroneRef } from './store';
 import { SENSOR_CONFIG } from './constants';
 
+const INITIAL_CAMERA_POS = new THREE.Vector3(30, 25, 30);
+const INITIAL_CAMERA_TARGET = new THREE.Vector3(0, 0, 0);
+
 export function CameraController() {
   const { camera } = useThree();
   const viewMode = useViewStore((state) => state.viewMode);
   const selectedDroneId = useViewStore((state) => state.selectedDroneId);
+  const resetViewTrigger = useViewStore((state) => state.resetViewTrigger);
   
   const controlsRef = useRef<any>(null);
-  
+
+  // Reset camera to initial position when triggered
+  useEffect(() => {
+    if (resetViewTrigger === 0) return;
+    camera.position.copy(INITIAL_CAMERA_POS);
+    if (controlsRef.current) {
+      controlsRef.current.target.copy(INITIAL_CAMERA_TARGET);
+      controlsRef.current.update();
+    }
+  }, [resetViewTrigger]);
+
   // Pre-allocated vectors for performance (GC pressure reduction)
   const targetLookAt = useRef(new THREE.Vector3());
   const noseOffset = useRef(new THREE.Vector3());

@@ -121,18 +121,10 @@ export function Drone({ droneId }: DroneProps) {
     const dz = currentPos.current.z - previousPos.current.z;
     const vel = Math.sqrt(dx * dx + dz * dz);
     
-    let turnRate = 0;
-    if (vel > 0.001) {
-      const heading = Math.atan2(dx, dz);
-      const prevHeading = Math.atan2(previousPos.current.x - group.position.x, previousPos.current.z - group.position.z);
-      let angleDiff = heading - prevHeading;
-      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-      turnRate = angleDiff;
-    }
-    
-    const targetRoll = -Math.sign(turnRate) * (Math.PI / 8) * Math.min(Math.abs(turnRate) * 20, 1) * Math.min(vel * 5, 1);
-    currentRoll.current = THREE.MathUtils.damp(currentRoll.current, targetRoll, SENSOR_CONFIG.DAMP_ROLL, delta);
+    // Roll comes from backend telemetry (spherical.roll) — computed in move_to
+    // per step from azimuth change, same formula as before. Damp for smooth animation.
+    const targetRollRad = THREE.MathUtils.degToRad(currentSpherical.current.roll ?? 0);
+    currentRoll.current = THREE.MathUtils.damp(currentRoll.current, targetRollRad, SENSOR_CONFIG.DAMP_ROLL, delta);
     
     // 3. ROTATION (Visual group only)
     const spherical = currentSpherical.current;

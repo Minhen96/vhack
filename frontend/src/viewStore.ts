@@ -7,7 +7,8 @@ interface ViewState {
   selectedDroneId: string | null;
   highDensity: boolean;
   isTerminalOpen: boolean;
-  
+  resetViewTrigger: number;
+
   // Actions
   setGlobalView: () => void;
   setFollowView: (droneId: string) => void;
@@ -15,6 +16,7 @@ interface ViewState {
   setSelectedDroneId: (id: string | null) => void;
   toggleHighDensity: () => void;
   setTerminalOpen: (open: boolean) => void;
+  triggerResetView: () => void;
 }
 
 export const useViewStore = create<ViewState>((set) => ({
@@ -22,6 +24,7 @@ export const useViewStore = create<ViewState>((set) => ({
   selectedDroneId: null,
   highDensity: false,
   isTerminalOpen: false,
+  resetViewTrigger: 0,
 
   setGlobalView: () => set({ 
     viewMode: 'GLOBAL', 
@@ -46,9 +49,15 @@ export const useViewStore = create<ViewState>((set) => ({
     highDensity: !state.highDensity 
   })),
 
-  setTerminalOpen: (open: boolean) => set({ 
-    isTerminalOpen: open 
+  setTerminalOpen: (open: boolean) => set({
+    isTerminalOpen: open
   }),
+
+  triggerResetView: () => set((state) => ({
+    resetViewTrigger: state.resetViewTrigger + 1,
+    viewMode: 'GLOBAL',
+    selectedDroneId: null,
+  })),
 }));
 
 export default useViewStore;
