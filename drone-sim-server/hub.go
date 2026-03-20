@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -486,6 +488,30 @@ func (h *Hub) unregisterClient(client *Client) {
 			DroneMutex.Unlock()
 
 			log.Printf("🛑 Drone client unregistered: %s", client.DroneID)
+
+			// Notify UI clients so they remove the stale drone from the map
+			if msg, err := json.Marshal(map[string]string{
+				"type":     "drone_disconnected",
+				"drone_id": client.DroneID,
+			}); err == nil {
+				h.broadcastToUIClients(msg)
+			}
+
+			// Notify backend/MCP so fleet registry and LLM agent are updated
+			go func(droneID string) {
+				backendURL := os.Getenv("BACKEND_URL")
+				if backendURL == "" {
+					backendURL = "http://localhost:8000"
+				}
+				body, _ := json.Marshal(map[string]string{"drone_id": droneID})
+				resp, err := http.Post(backendURL+"/deregister", "application/json", bytes.NewReader(body))
+				if err != nil {
+					log.Printf("⚠️  Failed to deregister drone %s with backend: %v", droneID, err)
+					return
+				}
+				resp.Body.Close()
+				log.Printf("✅ Drone %s deregistered from backend (status %d)", droneID, resp.StatusCode)
+			}(client.DroneID)
 		} else {
 			h.mu.Unlock()
 			// Already unregistered — ignore duplicate call
@@ -956,17 +982,24 @@ func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, elevati
 	droneXi := int(math.Round(droneX))
 	droneYi := int(math.Round(droneY))
 
-	// When the camera is tilted forward (elevation < 0), the footprint center is
-	// `droneZ / tan(-elevation)` units ahead horizontally. Extend the 2D radius to
-	// cover the full visible ground area; otherwise survivors in view are missed.
+	// Compute effective 2D search radius that matches the camera's ground footprint.
+	// For a tilted camera (elevation < 0):
+	//   forwardReach  = droneZ / tan(-elevation)  — horizontal distance to footprint centre
+	//   footprintRadius = tan(fov/2) * slantDist  — half-width of the cone at the ground
+	//   effectiveRadius = forwardReach + footprintRadius
+	// This ensures every point the camera can see is within the pre-filter radius,
+	// so in3DCone gets a chance to make the precise angular check.
 	effectiveRadius := scanRadius
 	if elevation < 0 && droneZ > 0 {
 		elRad := elevation * math.Pi / 180
-		tanVal := math.Tan(-elRad)
-		if tanVal > 0.01 { // guard against near-horizontal cameras (huge reach)
-			forwardReach := droneZ / tanVal
-			if forwardReach > effectiveRadius {
-				effectiveRadius = forwardReach + scanRadius
+		tanEl := math.Tan(-elRad)
+		if tanEl > 0.01 { // guard near-horizontal cameras (reach → ∞)
+			slantDist := droneZ / math.Sin(-elRad) // drone-to-ground slant distance
+			forwardReach := droneZ / tanEl          // horizontal distance to footprint centre
+			footprintRadius := math.Tan(fov/2*math.Pi/180) * slantDist
+			candidate := forwardReach + footprintRadius
+			if candidate > effectiveRadius {
+				effectiveRadius = candidate
 			}
 		}
 	}
@@ -985,13 +1018,10 @@ func computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, elevati
 		if !bresenhamLOS(droneXi, droneYi, int(math.Round(s.X)), int(math.Round(s.Z)), droneZ) {
 			continue // building blocks line of sight
 		}
-		// 3D falloff + angle of incidence (strongest signal directly above)
+		// 3D distance falloff only — angle factor removed so any survivor
+		// inside the visual cone is reliably detected regardless of camera tilt.
 		dist3D := math.Sqrt(dx*dx + dy*dy + droneZ*droneZ)
-		angleFactor := 1.0
-		if dist3D > 0 {
-			angleFactor = droneZ / dist3D
-		}
-		apparent := s.Thermal * math.Exp(-dist3D*0.005) * angleFactor
+		apparent := s.Thermal * math.Exp(-dist3D*0.005)
 		noise := (rand.Float64() - 0.5) * 0.4
 		temp := math.Round((apparent+noise)*10) / 10
 		readings = append(readings, ThermalReading{X: s.X, Y: s.Z, TempCelsius: temp})

@@ -87,6 +87,7 @@ type WebSocketMessageType =
   | 'grid_snapshot'
   | 'grid_update'
   | 'scan_heatmap'
+  | 'drone_disconnected'
   | 'global_state_update'
   | 'dispatch_aid';
 
@@ -371,6 +372,14 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
       break;
     }
     
+    case 'drone_disconnected': {
+      const droneId = (message as unknown as { drone_id: string }).drone_id;
+      useStore.getState().removeDrone(droneId);
+      delete dronesRef.current[droneId];
+      dronesRef.subscribers.forEach((cb) => cb(dronesRef.current));
+      break;
+    }
+
     case 'survivor_detected': {
       // Reconciled via global_state_update from server
       console.log('[WebSocket] Survivor message received (ignored):', message.type);

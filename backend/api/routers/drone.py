@@ -91,6 +91,13 @@ async def register_drone(req: RegisterRequest) -> dict:
         existing.status = DroneStatus.IDLE
         existing.current_task = None
         registry.register(existing)
+        # Notify agent so it can re-dispatch the drone after reconnect
+        await push_event({
+            "type": "drone_joined",
+            "drone_id": req.drone_id,
+            "drone_type": req.type,
+            "capabilities": req.capabilities,
+        })
         return {
             "success": True,
             "drone_id": req.drone_id,

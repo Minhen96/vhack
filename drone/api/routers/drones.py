@@ -188,6 +188,8 @@ async def start_search(drone_id: str, body: SearchRequest) -> dict:
                 if key not in reported:
                     reported.add(key)
                     confidence = round(min(temp / 37.5, 1.0), 3)
+                    # Notify frontend via WebSocket so detected count updates in real-time
+                    await map_client.send_survivor_detected(d, x, y, d.z, confidence)
                     await _push({
                         "type": "survivor_found",
                         "drone_id": d.id,
@@ -238,9 +240,10 @@ async def start_search(drone_id: str, body: SearchRequest) -> dict:
         async def _on_charge_tick(d: Drone) -> None:
             await map_client.send_drone_status(d)
 
-        await return_to_base(drone, on_waypoint=_on_return_waypoint, on_tick=_on_charge_tick)
-        await map_client.send_drone_status(drone)
-
+        # Push search_complete BEFORE returning to base so the LLM knows the
+        # sweep outcome (aborted or not) before charging_complete fires.
+        # This ensures the LLM can correctly match charging_complete events
+        # to aborted drones and re-dispatch them for Phase 2.
         await _push({
             "type": "search_complete",
             "drone_id": drone_id,
@@ -251,6 +254,9 @@ async def start_search(drone_id: str, body: SearchRequest) -> dict:
             "abort_reason": result.abort_reason,
             "battery_remaining_pct": result.battery_remaining_pct,
         })
+
+        await return_to_base(drone, on_waypoint=_on_return_waypoint, on_tick=_on_charge_tick)
+        await map_client.send_drone_status(drone)
 
     task = asyncio.create_task(run_search())
     _active_searches[drone_id] = task
