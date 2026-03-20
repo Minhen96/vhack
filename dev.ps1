@@ -99,20 +99,28 @@ if ($Run) {
     Write-Host "Starting Backend (8000)..."
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Backend (8000)'; & '$uvicornPath' backend.main:app --port 8000 --reload"
 
-    # Start Drone 1
-    Write-Host "Starting Drone #1 Scanner (8001)..."
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Drone #1 (8001)'; & '$uvicornPath' drone.main:app --port 8001 --reload"
+    # Start Drone #1 (Detection)
+    Write-Host "Starting Drone #1 Detection (8001)..."
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Drone #1 (8001)'; `$env:DRONE_TYPE='scanner'; `$env:DRONE_PORT='8001'; & '$uvicornPath' drone.main:app --port 8001 --reload"
 
-    # Start Drone 2
-    Write-Host "Starting Drone #2 Delivery (8002)..."
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Drone #2 (8002)'; `$env:DRONE_TYPE='delivery'; `$env:DRONE_PORT='8002'; & '$uvicornPath' drone.main:app --port 8002 --reload"
+    # Start Drone #2 (Detection)
+    Write-Host "Starting Drone #2 Detection (8002)..."
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Drone #2 (8002)'; `$env:DRONE_TYPE='scanner'; `$env:DRONE_PORT='8002'; & '$uvicornPath' drone.main:app --port 8002 --reload"
+
+    # Start Drone #3 (Aid)
+    Write-Host "Starting Drone #3 Aid (8003)..."
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Drone #3 (8003)'; `$env:DRONE_TYPE='delivery'; `$env:DRONE_PORT='8003'; & '$uvicornPath' drone.main:app --port 8003 --reload"
+
+    # Start Drone #4 (Aid)
+    Write-Host "Starting Drone #4 Aid (8004)..."
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Drone #4 (8004)'; `$env:DRONE_TYPE='delivery'; `$env:DRONE_PORT='8004'; & '$uvicornPath' drone.main:app --port 8004 --reload"
 
     # Start Frontend
-    Write-Host "Starting Frontend (5173)..."
+    Write-Host "Starting Frontend (3000)..."
     if (Get-Command pnpm -ErrorAction SilentlyContinue) {
-        Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Frontend (5173)'; cd frontend; pnpm run dev"
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Frontend (3000)'; cd frontend; pnpm run dev --port 3000"
     } else {
-        Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Frontend (5173)'; cd frontend; npm run dev"
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", "`$Host.UI.RawUI.WindowTitle = 'Frontend (3000)'; cd frontend; npm run dev -- --port 3000"
     }
 
     Write-Host "`nAll services started in separate windows." -ForegroundColor Green
@@ -120,5 +128,7 @@ if ($Run) {
     Write-Host "- Backend:    http://localhost:8000/docs"
     Write-Host "- Drone 1:    http://localhost:8001/docs"
     Write-Host "- Drone 2:    http://localhost:8002/docs"
+    Write-Host "- Drone 3:    http://localhost:8003/docs"
+    Write-Host "- Drone 4:    http://localhost:8004/docs"
     Write-Host "- Frontend:   http://localhost:3000"
 }

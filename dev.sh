@@ -118,17 +118,23 @@ if [ "$RUN" = true ]; then
         sleep 1
     done
 
-    # Start Drone #1 Scanner
-    ./.venv/bin/uvicorn drone.main:app --port 8001 --reload &
+    # Start Drone #1 (Detection)
+    DRONE_TYPE=scanner DRONE_PORT=8001 ./.venv/bin/uvicorn drone.main:app --port 8001 --reload &
 
-    # Start Drone #2 Delivery
-    DRONE_TYPE=delivery DRONE_PORT=8002 ./.venv/bin/uvicorn drone.main:app --port 8002 --reload &
+    # Start Drone #2 (Detection)
+    DRONE_TYPE=scanner DRONE_PORT=8002 ./.venv/bin/uvicorn drone.main:app --port 8002 --reload &
+
+    # Start Drone #3 (Aid)
+    DRONE_TYPE=delivery DRONE_PORT=8003 ./.venv/bin/uvicorn drone.main:app --port 8003 --reload &
+
+    # Start Drone #4 (Aid)
+    DRONE_TYPE=delivery DRONE_PORT=8004 ./.venv/bin/uvicorn drone.main:app --port 8004 --reload &
 
     # Start Frontend
     if command -v pnpm &> /dev/null; then
-        (cd frontend && pnpm run dev) &
+        (cd frontend && pnpm run dev --port 3000) &
     elif command -v npm &> /dev/null; then
-        (cd frontend && npm run dev) &
+        (cd frontend && npm run dev -- --port 3000) &
     else
         echo "Warning: npm/pnpm not found — skipping frontend. Install Node.js to enable it."
     fi
@@ -138,6 +144,8 @@ if [ "$RUN" = true ]; then
     echo "- Backend:    http://localhost:8000/docs"
     echo "- Drone 1:    http://localhost:8001/docs"
     echo "- Drone 2:    http://localhost:8002/docs"
+    echo "- Drone 3:    http://localhost:8003/docs"
+    echo "- Drone 4:    http://localhost:8004/docs"
     echo "- Frontend:   http://localhost:3000"
     
     # Wait for all background processes
