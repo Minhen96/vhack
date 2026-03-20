@@ -170,7 +170,16 @@ export function Drone({ droneId }: DroneProps) {
     lerpedFov.current = THREE.MathUtils.lerp(lerpedFov.current, targetFov, SENSOR_CONFIG.FOV_LERP);
     const currentFov = lerpedFov.current;
 
-    // Throttle check: update if alt, FOV, elevation, or roll changes.
+    // Always sync cone rotation to current elevation every frame.
+    // Must be outside the throttle: when stationary the throttle doesn't fire,
+    // so without this the cone stays at whatever rotation was last set (often 0
+    // from the initial default before the first WebSocket update arrives).
+    const elevationRad = THREE.MathUtils.degToRad(spherical.elevation * SENSOR_CONFIG.ELEVATION_FACTOR);
+    if (coneRef.current) {
+      coneRef.current.rotation.x = Math.PI / 2 + elevationRad;
+    }
+
+    // Throttle check: update scale/position/spotlight only when significant changes occur.
     // Roll must be included: when the visual group banks, cos(roll) < 1 reduces
     // the effective vertical reach of the cone, lifting the base above ground.
     if (
@@ -185,29 +194,16 @@ export function Drone({ droneId }: DroneProps) {
         spotlightRef.current.intensity = THREE.MathUtils.mapLinear(currentAlt, 5, 30, 100, 30);
       }
       if (coneRef.current) {
-        // rotation.x = PI/2 + elevationRad:
-        //   PI/2 alone  → cone opens in -Z (forward, horizon)
-        //   + elevation → tilts down (e.g. -PI/4 → forward-down 45°)
-        const elevationRad = THREE.MathUtils.degToRad(spherical.elevation * SENSOR_CONFIG.ELEVATION_FACTOR);
-        coneRef.current.rotation.x = Math.PI / 2 + elevationRad;
-
-        // Cone length = slant distance from drone nose to ground.
-        // When the visual group rolls (Z-rotation), the vertical component of the
-        // cone shrinks by cos(roll), lifting the base above ground. Dividing by
-        // cos(roll) compensates so the base always reaches y = -0.5 (ground plane).
-        // Clamp cos(roll) ≥ 0.3 to prevent infinite length at extreme banking.
-        const sinEl = Math.sin(elevationRad);
-        const cosRoll = Math.max(Math.cos(currentRoll.current), 0.3);
-        const droneHeight = group.position.y + 0.5; // +0.5: ground plane is at y=-0.5
-        const coneLength = sinEl < -0.05
-          ? Math.min(droneHeight / (Math.abs(sinEl) * cosRoll), droneHeight * 10)
-          : droneHeight * 2; // fallback for near-horizontal / upward cameras
+        // A static large cone length ensures the base is always far enough to either
+        // fully penetrate the ground mesh (rendering a perfect elliptical intersection)
+        // or fade off into the sky. This eliminates the floating cutoff base issue.
+        const coneLength = 300;
 
         const radius = Math.tan(fovRad / 2) * coneLength;
         coneRef.current.scale.set(radius, coneLength, radius);
 
-        // Place apex at drone nose. After Rx(PI/2+elRad), apex local coords:
-        //   y = -(coneLength/2)*sin(elRad),  z = (coneLength/2)*cos(elRad)
+        // Place apex at drone nose. After Rx(Math.PI/2 + elRad), apex local coords:
+        //   y = -(coneLength/2)*sin(elRad),  z = +(coneLength/2)*cos(elRad)
         // Offset position so apex lands at (0, 0, PIVOT_OFFSET).
         coneRef.current.position.y = (coneLength / 2) * Math.sin(elevationRad);
         coneRef.current.position.z = SENSOR_CONFIG.PIVOT_OFFSET[2] - (coneLength / 2) * Math.cos(elevationRad);
@@ -298,7 +294,6 @@ export function Drone({ droneId }: DroneProps) {
         <mesh position={[0, 0, 0.7]}><sphereGeometry args={[0.1, 8, 8]} /><primitive object={materials.ledWhite} /></mesh>
         
         {/* SENSOR ARRAY: Tip at the Nose (Aligned with Pilot Camera) */}
-        {/* rotation.x=PI/2 reorients the cone from +Y (default up) to -Z (forward), matching camera look direction */}
         <mesh ref={coneRef} rotation={[Math.PI / 2, 0, 0]}>
           <coneGeometry args={[1, 1, 32, 1, true]} />
           <primitive object={materials.sensorCone} />

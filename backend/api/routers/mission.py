@@ -101,6 +101,25 @@ async def mission_result():
 
 
 # --------------------------------------------------------------------------
+# POST /api/mission/stop
+# --------------------------------------------------------------------------
+
+
+@router.post("/stop")
+async def stop_mission():
+    """Signal the running mission to stop gracefully."""
+    from backend.agent.command_agent import get_mission_log
+    from backend.events import push as push_event
+
+    log = get_mission_log()
+    if log is None or not log.get("is_running"):
+        return {"status": "error", "error": "No mission is currently running."}
+
+    await push_event({"type": "mission_stop"})
+    return {"status": "ok", "message": "Stop signal sent. Mission will finish current operations and halt."}
+
+
+# --------------------------------------------------------------------------
 # POST /api/mission/reset
 # --------------------------------------------------------------------------
 

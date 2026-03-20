@@ -487,6 +487,11 @@ func (h *Hub) unregisterClient(client *Client) {
 			delete(Drones, client.DroneID)
 			DroneMutex.Unlock()
 
+			// Remove from position cache so reconnecting UI clients don't replay a stale drone
+			h.mu.Lock()
+			delete(h.lastPositionMsg, client.DroneID)
+			h.mu.Unlock()
+
 			log.Printf("🛑 Drone client unregistered: %s", client.DroneID)
 
 			// Notify UI clients so they remove the stale drone from the map
@@ -1090,6 +1095,19 @@ func ScanHandler(w http.ResponseWriter, r *http.Request) {
 
 	readings := computeThermalReadings(droneX, droneY, droneZ, scanRadius, azimuth, elevation, fov)
 	json.NewEncoder(w).Encode(readings)
+}
+
+// SurvivorsHandler handles GET /survivors
+// Returns all survivors with their current status so callers can skip
+// already-aided (AID_SENT) survivors before dispatching a delivery drone.
+func SurvivorsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(GetSurvivors())
 }
 
 // MapInfoHandler handles GET /map-info

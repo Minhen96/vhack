@@ -89,7 +89,8 @@ type WebSocketMessageType =
   | 'scan_heatmap'
   | 'drone_disconnected'
   | 'global_state_update'
-  | 'dispatch_aid';
+  | 'dispatch_aid'
+  | 'aid_delivered';
 
 /** Raw WebSocket message from server */
 interface WebSocketMessage {
@@ -567,6 +568,21 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
       break;
     }
     
+    case 'aid_delivered': {
+      // Drone delivered aid to (x, y) in backend coords → Three.js (x, z).
+      // Find the closest survivor within 2 units and mark them as AID_SENT.
+      const data = message as unknown as { x: number; y: number; drone_id: string };
+      const store = useStore.getState();
+      const nearest = store.survivors
+        .filter(s => s.status === 'DETECTED' || s.status === 'CONFIRMED')
+        .map(s => ({ s, d: Math.sqrt((s.position.x - data.x) ** 2 + (s.position.z - data.y) ** 2) }))
+        .sort((a, b) => a.d - b.d)[0];
+      if (nearest && nearest.d < 5) {
+        store.updateSurvivor(nearest.s.id, { status: 'AID_SENT' });
+      }
+      break;
+    }
+
     default:
       console.log('Unknown message type:', message.type);
   }
@@ -616,8 +632,21 @@ export const useStore = create<DroneStore>((set) => ({
   }),
   
   setSurvivors: (survivors) => set((state) => {
-    const newIds = new Set(survivors.filter(s => s.status !== 'TRAPPED').map(s => s.id));
-    return { survivors, detectedSurvivorIds: newIds };
+    const STATUS_PRIORITY: Record<SurvivorStatus, number> = {
+      TRAPPED: 0, DETECTED: 1, CONFIRMED: 1, AID_SENT: 2, RESCUED: 3,
+    };
+    // Merge incoming list with existing — preserve higher-priority statuses so
+    // a grid_snapshot from the server cannot downgrade AID_SENT back to DETECTED.
+    const existingMap = new Map(state.survivors.map(s => [s.id, s]));
+    const merged = survivors.map(s => {
+      const prev = existingMap.get(s.id);
+      if (prev && s.status && STATUS_PRIORITY[s.status] < STATUS_PRIORITY[prev.status]) {
+        return { ...s, status: prev.status };
+      }
+      return s;
+    });
+    const newIds = new Set(merged.filter(s => s.status !== 'TRAPPED').map(s => s.id));
+    return { survivors: merged, detectedSurvivorIds: newIds };
   }),
   
   addSurvivor: (survivor) =>
@@ -631,11 +660,20 @@ export const useStore = create<DroneStore>((set) => ({
     }),
   
   updateSurvivor: (id, updates) =>
-    set((state) => ({
-      survivors: state.survivors.map((s) =>
-        s.id === id ? { ...s, ...updates } : s
-      ),
-    })),
+    set((state) => {
+      const STATUS_PRIORITY: Record<SurvivorStatus, number> = {
+        TRAPPED: 0, DETECTED: 1, CONFIRMED: 1, AID_SENT: 2, RESCUED: 3,
+      };
+      return {
+        survivors: state.survivors.map((s) => {
+          if (s.id !== id) return s;
+          if (updates.status && STATUS_PRIORITY[updates.status] < STATUS_PRIORITY[s.status]) {
+            return { ...s, ...updates, status: s.status };
+          }
+          return { ...s, ...updates };
+        }),
+      };
+    }),
   
   setBlockedAreas: (blocked, timestamp) =>
     set({ blockedAreas: blocked, gridTimestamp: timestamp }),

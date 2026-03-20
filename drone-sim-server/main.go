@@ -119,6 +119,9 @@ func runServer() {
 	// Map info endpoint — returns searchable coordinate bounds for the LLM agent
 	mux.HandleFunc("/map-info", MapInfoHandler)
 
+	// Survivors endpoint — returns all survivors with their current status
+	mux.HandleFunc("/survivors", SurvivorsHandler)
+
 	// Configure server with timeouts
 	server := &http.Server{
 		Addr:           ":" + port,

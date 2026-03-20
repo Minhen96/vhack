@@ -3,6 +3,7 @@ BATTERY_DRAIN_SCAN: float = 0.8
 BATTERY_DRAIN_DELIVER: float = 0.8
 BATTERY_LOW_THRESHOLD: float = 20.0
 BATTERY_CRITICAL_THRESHOLD: float = 5.0
+BATTERY_DELIVERY_THRESHOLD: float = 30.0  # delivery drones charge first if below this
 BATTERY_CHARGE_RATE: float = 5.0   # % per second while charging at base (100/10 = 10s to full)
 SCAN_RADIUS_DEFAULT: int = 8
 DRONE_FOV: float = 60.0             # camera field of view in degrees

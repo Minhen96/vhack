@@ -214,17 +214,35 @@ async def delivery_aid(drone_id: str, x: int, y: int, z: int) -> dict:
     to the specified coordinates.
 
     The drone must have the delivery_aid capability and sufficient battery.
+    Skips delivery if the survivor at (x, y) is already aided (AID_SENT).
+    If battery is below 30%, the drone charges first before delivering.
     """
     drone = registry.get(drone_id)
     if not drone:
         return {"error": f"Drone '{drone_id}' not found."}
+
+    # Skip delivery if the target survivor is already aided (green on the map).
+    # Survivor coords: X = backend x, Z = backend y (ground plane).
+    sim_url = os.getenv("SIM_SERVER_URL", "http://localhost:8080")
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"{sim_url}/survivors", timeout=3.0)
+            for s in resp.json():
+                if s.get("status") in ("AID_SENT", "RESCUED"):
+                    if abs(s.get("x", 0) - x) <= 2 and abs(s.get("z", 0) - y) <= 2:
+                        return {
+                            "skipped": True,
+                            "message": f"Survivor at ({x}, {y}) already has status '{s['status']}'. Skipping delivery.",
+                        }
+        except Exception:
+            pass  # if sim server unreachable, proceed anyway
 
     url = f"http://{drone.host}:{drone.port}"
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{url}/drones/{drone_id}/deliver",
             json={"x": x, "y": y, "z": z},
-            timeout=10.0,
+            timeout=600.0,  # may include charge time (up to ~14s) + transit
         )
     return resp.json()
 

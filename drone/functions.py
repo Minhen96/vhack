@@ -652,12 +652,32 @@ async def deliver_aid(
             message="Battery critical — cannot deliver aid.",
         )
 
+    if drone.battery_low:
+        logger.warning(
+            "deliver_aid refused — battery low (%.1f%%) — return to base to charge first", drone.battery
+        )
+        return DeliverResult(
+            drone_id=drone.id,
+            success=False,
+            status="failed",
+            delivered_to=Position(**drone.position),
+            battery_remaining_pct=drone.battery,
+            message=f"Battery low ({drone.battery:.1f}%) — return to base to charge before delivering.",
+        )
+
     drone.status = DroneStatus.DELIVERING
 
-    # Navigate to target using A* (same obstacle avoidance as move_to).
-    # moving_status=DELIVERING keeps the drone status as "delivering" the whole
-    # approach — not "moving" — so MCP and Map Engine see the correct operation.
-    move_result = await move_to(drone, x, y, z, on_waypoint=on_waypoint, moving_status=DroneStatus.DELIVERING)
+    # Transit at MAX_BUILDING_HEIGHT so drone.z never drops below building tops
+    # during the approach. Interpolating from BASE_Z=10 down to z=0 mid-flight
+    # passes through building height (3–10), causing the drone to ghost through
+    # obstacle meshes. Flying flat at z=MAX_BUILDING_HEIGHT keeps the drone above
+    # all buildings the whole way; we only descend to the delivery altitude after
+    # arriving at the target XY.
+    move_result = await move_to(
+        drone, x, y, MAX_BUILDING_HEIGHT,
+        on_waypoint=on_waypoint,
+        moving_status=DroneStatus.DELIVERING,
+    )
 
     if not move_result.success:
         # Couldn't reach the target — blocked by obstacles or battery died mid-path
@@ -669,6 +689,9 @@ async def deliver_aid(
             battery_remaining_pct=drone.battery,
             message="Could not reach delivery target — path blocked or battery critical.",
         )
+
+    # Arrived at target XY — descend to requested delivery altitude
+    drone.z = z
 
     # Arrived — drop the aid package
     _drain(drone, BATTERY_DRAIN_DELIVER)

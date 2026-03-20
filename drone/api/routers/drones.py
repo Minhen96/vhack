@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from drone.api.schemas import DeliverRequest, MoveRequest, ScanRequest, SearchRequest
+from drone.constants import BATTERY_DELIVERY_THRESHOLD
 from drone.core.config import MCP_URL
 from drone.core.map_client import map_client
 from drone.functions import (
@@ -83,6 +84,27 @@ async def scan(drone_id: str, body: ScanRequest = ScanRequest()) -> ScanResult:
 async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
     drone = _lookup(drone_id)
 
+    # If battery is below the delivery threshold, return to base and charge first.
+    if drone.battery < BATTERY_DELIVERY_THRESHOLD and not drone.is_charging:
+        logger.info(
+            "deliver: %s battery %.1f%% < %.1f%% — charging first before delivery",
+            drone.id, drone.battery, BATTERY_DELIVERY_THRESHOLD,
+        )
+
+        async def _rtb_waypoint(d: Drone, step_dist: int) -> None:
+            await map_client.send_position(d, step_dist)
+            await map_client.send_drone_status(d)
+            await asyncio.sleep(0.1)
+
+        async def _rtb_tick(d: Drone) -> None:
+            await map_client.send_drone_status(d)
+
+        await return_to_base(drone, on_waypoint=_rtb_waypoint, on_tick=_rtb_tick)
+        # Wait for the charge loop to finish (battery reaches 100%)
+        if drone._charge_task and not drone._charge_task.done():
+            await drone._charge_task
+        await map_client.send_drone_status(drone)
+
     # Same as move — stream position updates to Map Engine at each step during approach
     async def on_waypoint(d: Drone, step_dist: int) -> None:
         await map_client.send_position(d, step_dist)
@@ -94,11 +116,15 @@ async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
     # Notify Map Engine: aid delivered at location + final status
     if result.status == "delivered":
         await map_client.send_aid_delivered(drone, body.x, body.y, body.z)
+        # Push final position — deliver_aid sets drone.z to the delivery altitude
+        # only after move_to returns, so we need one extra send_position here to
+        # move the drone from its transit altitude down to the delivery z in the UI.
+        await map_client.send_position(drone)
     await map_client.send_drone_status(drone)
 
-    # Auto-return to base if battery is low after delivery.
-    # Mirrors the start_search background task behaviour: push battery_low so the
-    # LLM agent knows, then autonomously navigate home and charge.
+    # Auto-return to base if battery is low (includes refusal case: battery was
+    # already low before delivery was attempted, drone didn't move but still needs
+    # to return to charge).
     if drone.battery_low:
         async def _auto_return() -> None:
             try:

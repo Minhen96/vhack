@@ -49,6 +49,14 @@ const DroneCard: React.FC<{ droneId: string }> = ({ droneId }) => {
   const { setFollowView, setPilotView, selectedDroneId } = useViewStore();
   const setHoveredDroneId = useStore((state) => state.setHoveredDroneId);
   const isSelected = selectedDroneId === droneId;
+  const survivors = useStore(state => state.survivors);
+  const isAiding = useMemo(() => {
+    if (!drone) return false;
+    return survivors.some(s =>
+      s.status === 'AID_SENT' &&
+      Math.sqrt(Math.pow(s.position.x - drone.position.x, 2) + Math.pow(s.position.z - drone.position.z, 2)) < 3
+    );
+  }, [survivors, drone]);
 
   if (!drone) return null;
 
@@ -56,15 +64,6 @@ const DroneCard: React.FC<{ droneId: string }> = ({ droneId }) => {
   const altitudeHistory = [5.2, 8.4, 12.1, 10.5, 9.8, 11.2, drone.position.y];
 
   const batteryColor = drone.battery > 50 ? 'bg-green-400' : drone.battery > 20 ? 'bg-yellow-400' : 'bg-red-500';
-
-  // Logistics Check: Is this drone hovering over an AID_SENT target?
-  const survivors = useStore(state => state.survivors);
-  const isAiding = useMemo(() => {
-    return survivors.some(s => 
-      s.status === 'AID_SENT' && 
-      Math.sqrt(Math.pow(s.position.x - drone.position.x, 2) + Math.pow(s.position.z - drone.position.z, 2)) < 3
-    );
-  }, [survivors, drone.position.x, drone.position.z]);
 
   return (
     <motion.div
