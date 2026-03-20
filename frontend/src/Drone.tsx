@@ -197,7 +197,18 @@ export function Drone({ droneId }: DroneProps) {
         // A static large cone length ensures the base is always far enough to either
         // fully penetrate the ground mesh (rendering a perfect elliptical intersection)
         // or fade off into the sky. This eliminates the floating cutoff base issue.
-        const coneLength = 300;
+        // const coneLength = 300;
+
+        // Vertical drop of cone axis = cos(el) per unit length (after roll).
+        // Clamp cos(roll) ≥ 0.3 to prevent infinite length at extreme banking.
+        const cosEl = Math.cos(elevationRad);
+        const cosRoll = Math.max(Math.cos(currentRoll.current), 0.3);
+        // Add 2 units below the ground plane (y = -0.5) so the cone visually
+        // penetrates the terrain rather than z-fighting at the exact ground edge.
+        const droneHeight = group.position.y + 0.5 + 2.0;
+        const coneLength = Math.abs(cosEl) > 0.05
+          ? Math.min(droneHeight / (Math.abs(cosEl) * cosRoll), droneHeight * 10)
+          : droneHeight * 2; // fallback for near-vertical cameras (el ≈ ±90°)
 
         const radius = Math.tan(fovRad / 2) * coneLength;
         coneRef.current.scale.set(radius, coneLength, radius);
