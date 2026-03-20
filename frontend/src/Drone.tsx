@@ -53,13 +53,13 @@ export function Drone({ droneId }: DroneProps) {
   const currentPos = useRef(new THREE.Vector3(0, 10, 0));
   const currentRoll = useRef(0);
   const targetAzimuth = useRef(0);
-  const currentSpherical = useRef({ azimuth: 0, elevation: 0, fov: 60, scan_radius: 10 });
+  const currentSpherical = useRef({ azimuth: 0, elevation: 0, fov: 60, scan_radius: 10, roll: 0 });
   const droneStatus = useRef<DroneStatus>('SCANNING');
   
   // Throttle & Optimization Refs
   const lastDetectionTime = useRef(0);
   const detectedSurvivors = useRef<Set<string>>(new Set());
-  const lastVisualUpdate = useRef({ fov: -1, alt: -1 });
+  const lastVisualUpdate = useRef({ fov: -1, alt: -1, elevation: -999 });
   const lerpedFov = useRef(90);
   const spotlightTargetRef = useRef<THREE.Object3D>(null);
 
@@ -156,31 +156,44 @@ export function Drone({ droneId }: DroneProps) {
     lerpedFov.current = THREE.MathUtils.lerp(lerpedFov.current, targetFov, SENSOR_CONFIG.FOV_LERP);
     const currentFov = lerpedFov.current;
 
-    // Throttle check: update if alt changes or smoothed FOV moves sufficiently
-    if (Math.abs(lastVisualUpdate.current.alt - currentAlt) > 0.05 || Math.abs(lastVisualUpdate.current.fov - currentFov) > 0.1) {
+    // Throttle check: update if alt, FOV, or elevation changes
+    if (
+      Math.abs(lastVisualUpdate.current.alt - currentAlt) > 0.05 ||
+      Math.abs(lastVisualUpdate.current.fov - currentFov) > 0.1 ||
+      Math.abs(lastVisualUpdate.current.elevation - spherical.elevation) > 0.5
+    ) {
       const fovRad = THREE.MathUtils.degToRad(currentFov);
       if (spotlightRef.current) {
-        // EXACT PARITY: Match Camera Vertical FOV exactly
         spotlightRef.current.angle = fovRad / 2;
         spotlightRef.current.intensity = THREE.MathUtils.mapLinear(currentAlt, 5, 30, 100, 30);
       }
       if (coneRef.current) {
         // rotation.x = PI/2 + elevationRad:
         //   PI/2 alone  → cone opens in -Z (forward, horizon)
-        //   + elevation → tilts cone down by elevation angle (e.g. -PI/4 → forward-down 45°)
+        //   + elevation → tilts down (e.g. -PI/4 → forward-down 45°)
         const elevationRad = THREE.MathUtils.degToRad(spherical.elevation * SENSOR_CONFIG.ELEVATION_FACTOR);
         coneRef.current.rotation.x = Math.PI / 2 + elevationRad;
 
-        const radius = Math.tan(fovRad / 2) * currentAlt;
-        coneRef.current.scale.set(radius, currentAlt, radius);
+        // Cone length = slant distance from drone nose to ground.
+        // slant = altitude / |sin(elevation)| so the base circle lands on y=0.
+        // Cap when elevation is near-horizontal (sin → 0) to avoid infinite length.
+        const sinEl = Math.sin(elevationRad);
+        // +0.5 accounts for the visual ground plane being at y=-0.5 in the scene
+        const droneHeight = group.position.y + 0.5;
+        const coneLength = sinEl < -0.05
+          ? Math.min(droneHeight / Math.abs(sinEl), droneHeight * 10)
+          : droneHeight * 2; // fallback for near-horizontal / upward cameras
 
-        // Place apex at drone nose. After Rx(PI/2+elRad) the apex's local coords are:
-        //   y = -(alt/2)*sin(elRad), z = (alt/2)*cos(elRad)
-        // Subtract those to land apex at (0, 0, PIVOT_OFFSET).
-        coneRef.current.position.y = (currentAlt / 2) * Math.sin(elevationRad);
-        coneRef.current.position.z = SENSOR_CONFIG.PIVOT_OFFSET[2] - (currentAlt / 2) * Math.cos(elevationRad);
+        const radius = Math.tan(fovRad / 2) * coneLength;
+        coneRef.current.scale.set(radius, coneLength, radius);
+
+        // Place apex at drone nose. After Rx(PI/2+elRad), apex local coords:
+        //   y = -(coneLength/2)*sin(elRad),  z = (coneLength/2)*cos(elRad)
+        // Offset position so apex lands at (0, 0, PIVOT_OFFSET).
+        coneRef.current.position.y = (coneLength / 2) * Math.sin(elevationRad);
+        coneRef.current.position.z = SENSOR_CONFIG.PIVOT_OFFSET[2] - (coneLength / 2) * Math.cos(elevationRad);
       }
-      lastVisualUpdate.current = { fov: currentFov, alt: currentAlt };
+      lastVisualUpdate.current = { fov: currentFov, alt: currentAlt, elevation: spherical.elevation };
     }
 
     // 6. SENSOR OPACITY PULSE

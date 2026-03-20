@@ -68,7 +68,11 @@ SYSTEM_PROMPT = (
     "                          Call plan_search_zones with ALL current scanner IDs (including the new one).\n"
     "                          Call start_search ONLY for the new drone using its assigned zone.\n"
     "                          Do NOT restart existing searches. Then wait_for_event.\n"
-    "  On drone_left        → remove that drone from your active list. Then wait_for_event.\n"
+    "  On drone_left        → remove that drone from your active list.\n"
+    "                          If that drone had an active search, treat it as search_complete (aborted=True).\n"
+    "                          If all started drones are now done (complete or left), go to PHASE 4.\n"
+    "                          Otherwise keep waiting.\n"
+    "  Then wait_for_event.\n"
     "  On timeout           → call wait_for_event again (searches still running).\n\n"
 
     "PHASE 4 — Mission review:\n"

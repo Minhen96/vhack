@@ -188,6 +188,8 @@ async def start_search(drone_id: str, body: SearchRequest) -> dict:
                 if key not in reported:
                     reported.add(key)
                     confidence = round(min(temp / 37.5, 1.0), 3)
+                    # Notify frontend via WebSocket so detected count updates in real-time
+                    await map_client.send_survivor_detected(d, x, y, d.z, confidence)
                     await _push({
                         "type": "survivor_found",
                         "drone_id": d.id,

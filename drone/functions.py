@@ -324,8 +324,10 @@ async def passive_waypoint_scan(
                     temp = r.get("temp_celsius", 0.0)
                     if 30 < temp < 42:
                         await on_survivor(int(round(r["x"])), int(round(r["y"])), temp)
-        # Mark camera footprint center as covered (not drone position).
-        # For elevation=-45° at altitude z: footprint center is z units ahead in azimuth direction.
+        # Mark every bucket along the ground projection of the camera cone:
+        # from the drone's ground position to the footprint center.
+        # At elevation=-45°, altitude z: footprint center is z units ahead; the
+        # cone covers all buckets along that line, not just the far end.
         el_rad = math.radians(drone.elevation)
         az_rad = math.radians(drone.azimuth)
         if el_rad < 0 and drone.z > 0:
@@ -333,8 +335,15 @@ async def passive_waypoint_scan(
             fpx = round(drone.x + h_dist * math.sin(az_rad))
             fpy = round(drone.y - h_dist * math.cos(az_rad))
         else:
+            h_dist = 0.0
             fpx, fpy = drone.x, drone.y
-        asyncio.create_task(_report_covered(fpx, fpy))
+        # Step along the line at BUCKET_SIZE intervals so every bucket is hit
+        num_steps = max(1, round(h_dist / _BUCKET_SIZE))
+        for i in range(num_steps + 1):
+            t = i / num_steps
+            cx = round(drone.x + (fpx - drone.x) * t)
+            cy = round(drone.y + (fpy - drone.y) * t)
+            asyncio.create_task(_report_covered(cx, cy))
     except Exception:
         pass  # silent — passive scan failure must never disrupt movement
 
@@ -380,7 +389,7 @@ async def thermal_scan(drone: Drone, radius: int = SCAN_RADIUS_DEFAULT) -> ScanR
     # We only need the forward arc — centered on current heading, ±90° each side.
     # With FOV=60°: 3 steps × 60° = 180° total coverage.
     original_azimuth = drone.azimuth
-    num_steps = math.ceil(180 / drone.fov)
+    num_steps = math.ceil(360 / drone.fov)
     step_angle = drone.fov
     start_azimuth = original_azimuth - (num_steps - 1) / 2 * step_angle
 
