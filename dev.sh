@@ -99,10 +99,24 @@ if [ "$RUN" = true ]; then
     echo "Starting services in background..."
 
     # Start Go Sim Server (using a subshell to avoid directory change issues)
-    (cd drone-sim-server && PORT=8080 go run . --server) &
+    if command -v go &> /dev/null; then
+        (cd drone-sim-server && PORT=8080 go run . --server) &
+    else
+        echo "Warning: Go not found — skipping sim server. Install Go to enable it."
+    fi
 
     # Start Backend
     ./.venv/bin/uvicorn backend.main:app --port 8000 --reload &
+
+    # Wait for backend to be ready before starting drones
+    echo "Waiting for backend to be ready..."
+    for i in $(seq 1 30); do
+        if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+            echo "Backend is ready."
+            break
+        fi
+        sleep 1
+    done
 
     # Start Drone #1 Scanner
     ./.venv/bin/uvicorn drone.main:app --port 8001 --reload &
@@ -113,8 +127,10 @@ if [ "$RUN" = true ]; then
     # Start Frontend
     if command -v pnpm &> /dev/null; then
         (cd frontend && pnpm run dev) &
-    else
+    elif command -v npm &> /dev/null; then
         (cd frontend && npm run dev) &
+    else
+        echo "Warning: npm/pnpm not found — skipping frontend. Install Node.js to enable it."
     fi
 
     echo -e "\nAll services started. Press Ctrl+C to stop all."
