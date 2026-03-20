@@ -8,7 +8,8 @@ import {
   Home, 
   Battery, 
   Wind,
-  Activity
+  Activity,
+  Package
 } from 'lucide-react';
 
 const AltitudeSparkline: React.FC<{ data: number[] }> = ({ data }) => {
@@ -56,6 +57,15 @@ const DroneCard: React.FC<{ droneId: string }> = ({ droneId }) => {
 
   const batteryColor = drone.battery > 50 ? 'bg-green-400' : drone.battery > 20 ? 'bg-yellow-400' : 'bg-red-500';
 
+  // Logistics Check: Is this drone hovering over an AID_SENT target?
+  const survivors = useStore(state => state.survivors);
+  const isAiding = useMemo(() => {
+    return survivors.some(s => 
+      s.status === 'AID_SENT' && 
+      Math.sqrt(Math.pow(s.position.x - drone.position.x, 2) + Math.pow(s.position.z - drone.position.z, 2)) < 3
+    );
+  }, [survivors, drone.position.x, drone.position.z]);
+
   return (
     <motion.div
       layout
@@ -77,6 +87,12 @@ const DroneCard: React.FC<{ droneId: string }> = ({ droneId }) => {
           <span className="text-[10px] font-bold font-mono tracking-tighter text-white/90">
             DRN-{droneId.slice(-4).toUpperCase()}
           </span>
+          {isAiding && (
+            <div className="flex items-center gap-1 bg-mission-success/20 text-mission-success border border-mission-success/30 px-1.5 py-0.5 rounded-full animate-pulse">
+              <Package size={8} />
+              <span className="text-[8px] font-bold">AID_SENT</span>
+            </div>
+          )}
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-1.5">
@@ -137,7 +153,10 @@ export const FleetSidebar: React.FC = () => {
   const droneIds = useMemo(() => Object.keys(drones).sort(), [drones]);
 
   return (
-    <aside className="fixed left-6 top-[56px] bottom-24 w-60 z-40 pointer-events-none select-none flex flex-col gap-4">
+    <aside 
+      style={{ willChange: 'transform' }}
+      className="fixed left-6 top-[56px] bottom-24 w-60 z-40 pointer-events-none select-none flex flex-col gap-4"
+    >
       <div className="flex items-center justify-between px-2 pt-2">
         <div className="flex items-center gap-2">
           <Activity size={10} className="text-mission-accent" />

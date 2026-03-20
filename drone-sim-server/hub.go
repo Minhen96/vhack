@@ -80,45 +80,46 @@ var (
 
 // Survivor represents a survivor position in the disaster area
 type Survivor struct {
-	ID      string  `json:"id"`
-	X       float64 `json:"x"`
-	Y       float64 `json:"y"`       // Altitude in Three.js (ground = 0)
-	Z       float64 `json:"z"`       // Ground plane coordinate
-	Status  string  `json:"status"`
-	Thermal float64 `json:"thermal"` // Body temperature in °C (36–37.5), used by /scan
+	ID                string  `json:"id"`
+	X                 float64 `json:"x"`
+	Y                 float64 `json:"y"` // Altitude in Three.js (ground = 0)
+	Z                 float64 `json:"z"` // Ground plane coordinate
+	Status            string  `json:"status"`
+	Thermal           float64 `json:"thermal"` // Body temperature in °C (36–37.5), used by /scan
+	IsDetected        bool    `json:"is_detected"`
+	DetectedByDroneID string  `json:"detected_by_drone_id"`
+	DiscoveryTime     int64   `json:"discovery_time"`
 }
 
-// Global Survivors - randomly generated on server startup
+// Global Survivors - thread-safe map for O(1) detection lookups
 var (
-	Survivors     []Survivor
+	Survivors      = make(map[string]*Survivor)
 	SurvivorsMutex sync.RWMutex
 )
 
 // GenerateSurvivors creates random survivors across the map area
-// Map area: X: -40 to 40, Z: -40 to 40
-func GenerateSurvivors(count int) []Survivor {
-	survivors := make([]Survivor, count)
+func GenerateSurvivors(count int) map[string]*Survivor {
+	survivors := make(map[string]*Survivor)
 	
 	for i := 0; i < count; i++ {
-		// Random position within map bounds (avoiding command base at 0,0)
 		var x, z float64
 		for {
 			x = (rand.Float64()*80 - 40) // -40 to 40
 			z = (rand.Float64()*80 - 40) // -40 to 40
-			// Avoid spawning too close to command base (within 10 units)
 			distFromBase := math.Sqrt(x*x + z*z)
 			if distFromBase > 10 {
 				break
 			}
 		}
 		
-		survivors[i] = Survivor{
-			ID:      fmt.Sprintf("survivor_%d", i+1),
+		id := fmt.Sprintf("survivor_%d", i+1)
+		survivors[id] = &Survivor{
+			ID:      id,
 			X:       x,
-			Y:       0,                           // Ground level (maps to Three.js Y)
-			Z:       z,                           // Ground plane (maps to Three.js Z)
-			Status:  "DETECTED",
-			Thermal: 36.0 + rand.Float64()*1.5,  // 36.0–37.5 °C body temp
+			Y:       0,
+			Z:       z,
+			Status:  "TRAPPED",
+			Thermal: 36.0 + rand.Float64()*1.5,
 		}
 		
 		log.Printf("🚑 Generated survivor %d at (%.1f, %.1f)", i+1, x, z)
@@ -127,9 +128,16 @@ func GenerateSurvivors(count int) []Survivor {
 	return survivors
 }
 
-// GetSurvivors returns a copy of the current survivors list
-func GetSurvivors() []Survivor {
-	return Survivors
+// GetSurvivors returns a snapshot of current survivors
+func GetSurvivors() []*Survivor {
+	SurvivorsMutex.RLock()
+	defer SurvivorsMutex.RUnlock()
+	
+	list := make([]*Survivor, 0, len(Survivors))
+	for _, s := range Survivors {
+		list = append(list, s)
+	}
+	return list
 }
 
 // =============================================================================
@@ -520,8 +528,8 @@ func (h *Hub) handleDroneMessage(message []byte) {
 	case MessageTypeSurvivorDetected:
 		// Parse survivor detection from drone
 		h.handleSurvivorDetected(message)
-		// Broadcast to UI clients
-		h.broadcastToUIClients(message)
+		// No longer broadcasting raw drone message to UI; 
+		// handleSurvivorDetected will send a clean GlobalStateUpdate instead.
 
 	case MessageTypeScanHeatmap:
 		// Raw thermal readings from drone scan — forward to UI for heatmap rendering
@@ -585,8 +593,60 @@ func (h *Hub) handleSurvivorDetected(message []byte) {
 		return
 	}
 
-	log.Printf("🚨 Survivor detected by drone %s at (%.2f, %.2f, %.2f) - confidence: %.2f",
-		detectMsg.DroneID, detectMsg.X, detectMsg.Y, detectMsg.Z, detectMsg.Confidence)
+	// 1. Find the survivor in the global state
+	SurvivorsMutex.Lock()
+	var s *Survivor
+	var exists bool
+	
+	if detectMsg.ID != "" {
+		s, exists = Survivors[detectMsg.ID]
+	}
+	
+	// If ID is not provided or not found, try proximity (1.5m)
+	if !exists {
+		for _, v := range Survivors {
+			dx := v.X - detectMsg.X
+			dz := v.Z - detectMsg.Y // Backend Y is ground plane Z
+			if math.Sqrt(dx*dx+dz*dz) < 1.5 {
+				s = v
+				exists = true
+				break
+			}
+		}
+	}
+
+	if exists {
+		// 2. Idempotency Check: Only update and broadcast if newly detected
+		if !s.IsDetected || s.Status == "TRAPPED" {
+			s.IsDetected = true
+			s.DetectedByDroneID = detectMsg.DroneID
+			s.DiscoveryTime = detectMsg.Timestamp
+			s.Status = "DETECTED"
+			
+			log.Printf("🚨 NEW Survivor detected: %s (Drone: %s)", s.ID, detectMsg.DroneID)
+			
+			// 3. Broadcast minimal diff (GlobalStateUpdate)
+			update := GlobalStateUpdate{
+				Type: MessageTypeGlobalStateUpdate,
+				Survivor: SurvivorState{
+					ID:                s.ID,
+					X:                 s.X,
+					Y:                 s.Y,
+					Z:                 s.Z,
+					IsDetected:        true,
+					Status:            s.Status,
+					DetectedByDroneID: s.DetectedByDroneID,
+					Timestamp:         s.DiscoveryTime,
+				},
+			}
+			if updateJSON, err := json.Marshal(update); err == nil {
+				h.broadcastToUIClients(updateJSON)
+			}
+		}
+	} else {
+		log.Printf("⚠️  Detected unknown signature at (%.2f, %.2f) - No survivor match", detectMsg.X, detectMsg.Y)
+	}
+	SurvivorsMutex.Unlock()
 }
 
 // handleUIMessage processes messages from UI clients
@@ -606,6 +666,14 @@ func (h *Hub) handleUIMessage(message []byte) {
 		h.handleUISurvivorDetected(message)
 		// Broadcast acknowledgment to all UI clients
 		h.broadcastToUIClients(message)
+
+	case MessageTypeDispatchAid:
+		var aidMsg struct {
+			TargetID string `json:"target_id"`
+		}
+		if err := json.Unmarshal(message, &aidMsg); err == nil {
+			h.handleDispatchAid(aidMsg.TargetID)
+		}
 
 	default:
 		log.Printf("📥 Received unknown UI message type: %s", msgType.Type)
@@ -700,7 +768,44 @@ func (h *Hub) getUICount() int {
 	return len(h.UIClients)
 }
 
-// GetInitialGridSnapshot returns the initial grid snapshot with Command Base coordinates
+// handleDispatchAid updates a survivor's status to AID_SENT
+func (h *Hub) handleDispatchAid(targetID string) {
+	SurvivorsMutex.Lock()
+	defer SurvivorsMutex.Unlock()
+
+	s, exists := Survivors[targetID]
+	if !exists {
+		log.Printf("⚠️  Cannot dispatch aid: Unknown survivor %s", targetID)
+		return
+	}
+
+	// Only update if not already aided
+	if s.Status != "AID_SENT" {
+		s.Status = "AID_SENT"
+		log.Printf("📦 AID DISPATCHED to survivor %s", s.ID)
+
+		// Broadcast update
+		update := GlobalStateUpdate{
+			Type: MessageTypeGlobalStateUpdate,
+			Survivor: SurvivorState{
+				ID:                s.ID,
+				X:                 s.X,
+				Y:                 s.Y,
+				Z:                 s.Z,
+				IsDetected:        s.IsDetected,
+				Status:            s.Status,
+				DetectedByDroneID: s.DetectedByDroneID,
+				Timestamp:         time.Now().UnixMilli(),
+			},
+		}
+		if updateJSON, err := json.Marshal(update); err == nil {
+			h.broadcastToUIClients(updateJSON)
+		}
+	}
+}
+
+// GetInitialGridSnapshot returns a snapshot of the grid for a new client
+// Command Base coordinates
 func (h *Hub) GetInitialGridSnapshot() GridSnapshot {
 	return GridSnapshot{
 		Type:      MessageTypeGridSnapshot,
@@ -714,6 +819,24 @@ func (h *Hub) GetInitialGridSnapshot() GridSnapshot {
 			X: BaseX,
 			Y: BaseY,
 		},
+		Survivors: func() []SurvivorState {
+			SurvivorsMutex.RLock()
+			defer SurvivorsMutex.RUnlock()
+			list := make([]SurvivorState, 0, len(Survivors))
+			for _, s := range Survivors {
+				list = append(list, SurvivorState{
+					ID:                s.ID,
+					X:                 s.X,
+					Y:                 s.Y,
+					Z:                 s.Z,
+					IsDetected:        s.IsDetected,
+					Status:            s.Status,
+					DetectedByDroneID: s.DetectedByDroneID,
+					Timestamp:         s.DiscoveryTime,
+				})
+			}
+			return list
+		}(),
 	}
 }
 
@@ -1063,13 +1186,21 @@ func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request, clientType string
 			Y: BaseY,
 			Z: 10.0,
 		},
-		Survivors: func() []Survivor {
+		Survivors: func() []SurvivorState {
 			SurvivorsMutex.RLock()
 			defer SurvivorsMutex.RUnlock()
-			list := make([]Survivor, len(Survivors))
-			for i, s := range Survivors {
-				list[i] = s
-				list[i].Status = "UNDETECTED"
+			list := make([]SurvivorState, 0, len(Survivors))
+			for _, s := range Survivors {
+				list = append(list, SurvivorState{
+					ID:                s.ID,
+					X:                 s.X,
+					Y:                 s.Y,
+					Z:                 s.Z,
+					IsDetected:        s.IsDetected,
+					Status:            s.Status,
+					DetectedByDroneID: s.DetectedByDroneID,
+					Timestamp:         s.DiscoveryTime,
+				})
 			}
 			return list
 		}(),
@@ -1112,11 +1243,11 @@ func generateDroneID() string {
 
 // InitConnectionResponse is sent to clients upon successful connection
 type InitConnectionResponse struct {
-	Type         string      `json:"type"`
-	DroneID      string      `json:"drone_id,omitempty"`
-	Timestamp    int64       `json:"timestamp"`
-	GridSnapshot GridSnapshot `json:"grid_snapshot"`
-	Position     Position    `json:"position,omitempty"`
-	Survivors    []Survivor  `json:"survivors,omitempty"`
-	Buildings    []Building  `json:"buildings,omitempty"`
+	Type         string          `json:"type"`
+	DroneID      string          `json:"drone_id,omitempty"`
+	Timestamp    int64           `json:"timestamp"`
+	GridSnapshot GridSnapshot    `json:"grid_snapshot"`
+	Position     Position        `json:"position,omitempty"`
+	Survivors    []SurvivorState `json:"survivors,omitempty"`
+	Buildings    []Building      `json:"buildings,omitempty"`
 }

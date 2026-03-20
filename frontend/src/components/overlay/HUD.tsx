@@ -83,6 +83,7 @@ export const HUD: React.FC = () => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      style={{ willChange: 'transform' }}
       className="fixed inset-0 pointer-events-none z-30 overflow-hidden"
     >
       {/* Tactical Elements - Only in Pilot Mode */}

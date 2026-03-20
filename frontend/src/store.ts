@@ -17,6 +17,7 @@ export interface SphericalCoords {
   elevation: number;
   fov: number;
   scan_radius: number;
+  roll?: number;
 }
 
 /** Complete drone state from WebSocket messages */
@@ -75,7 +76,7 @@ export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'er
 export type DroneStatus = 'SCANNING' | 'RETURNING' | 'IDLE' | 'SEARCHING';
 
 /** Survivor status */
-export type SurvivorStatus = 'UNDETECTED' | 'DETECTED' | 'CONFIRMED' | 'RESCUED';
+export type SurvivorStatus = 'TRAPPED' | 'DETECTED' | 'AID_SENT' | 'CONFIRMED' | 'RESCUED';
 
 /** WebSocket message types */
 type WebSocketMessageType =
@@ -85,7 +86,9 @@ type WebSocketMessageType =
   | 'survivors_update'
   | 'grid_snapshot'
   | 'grid_update'
-  | 'scan_heatmap';
+  | 'scan_heatmap'
+  | 'global_state_update'
+  | 'dispatch_aid';
 
 /** Raw WebSocket message from server */
 interface WebSocketMessage {
@@ -125,10 +128,14 @@ interface DroneStore {
   // Mission state
   missionRunning: boolean;
 
+  // Optimized detection tracking
+  detectedSurvivorIds: Set<string>;
+
   // Actions
   setConnectionStatus: (status: ConnectionStatus) => void;
   setDrone: (drone: DroneState) => void;
   setDrones: (drones: Record<string, DroneState>) => void;
+  updateDroneTransient: (drone: DroneState) => void; // New transient-only action
   removeDrone: (droneId: string) => void;
   setSurvivors: (survivors: Survivor[]) => void;
   addSurvivor: (survivor: Survivor) => void;
@@ -348,13 +355,27 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         timestamp: data.timestamp,
       };
       
-      // Update both React state (for UI) and ref (for high-frequency access)
-      useStore.getState().setDrone(drone);
+      // Update transient ref for high-frequency 3D updates (NO React re-render)
       updateDronesRef(drone);
+      
+      // Update React state ONLY if status/battery or critical info changed
+      // This keeps the Overlay/UI responsive without 60FPS re-renders
+      const prevState = useStore.getState().drones[drone.drone_id];
+      const shouldUpdateState = !prevState || 
+                                prevState.status !== drone.status || 
+                                Math.abs(prevState.battery - drone.battery) > 1;
+
+      if (shouldUpdateState) {
+        useStore.getState().setDrone(drone);
+      }
       break;
     }
     
-    case 'survivor_detected':
+    case 'survivor_detected': {
+      // Reconciled via global_state_update from server
+      console.log('[WebSocket] Survivor message received (ignored):', message.type);
+      break;
+    }
     case 'survivors_update': {
       console.log('[WebSocket] Survivor message received:', message.type);
       console.log('[WebSocket] Full survivor message data:', JSON.stringify(message));
@@ -375,7 +396,7 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         position: {
           x: data.x,
           y: 0.3,   // fixed ground offset so survivor model sits on terrain
-          z: data.y, // grid Y (ground plane) → Three.js Z
+          z: data.z, // grid Z → Three.js Z
         },
         confidence: data.confidence,
         status: data.status || 'DETECTED',
@@ -384,20 +405,48 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         detected_by: data.drone_id,
       };
       
-      // Check if survivor already exists (by position proximity)
-      const existingIndex = useStore.getState().survivors.findIndex(
-        (s) => Math.abs(s.position.x - survivor.position.x) < 1 && 
-               Math.abs(s.position.z - survivor.position.z) < 1
-      );
-      
-      if (existingIndex >= 0) {
-        useStore.getState().updateSurvivor(
-          useStore.getState().survivors[existingIndex].id,
-          { confidence: Math.max(useStore.getState().survivors[existingIndex].confidence, survivor.confidence), status: survivor.status }
-        );
+      const store = useStore.getState();
+      const existing = store.survivors.find((s: Survivor) => {
+        const dx = s.position.x - survivor.position.x;
+        const dz = s.position.z - survivor.position.z;
+        return Math.sqrt(dx * dx + dz * dz) < 1.5;
+      });
+
+      if (existing) {
+        store.updateSurvivor(existing.id, { 
+          confidence: Math.max(existing.confidence, survivor.confidence), 
+          status: survivor.status,
+          detected_by: survivor.detected_by,
+          timestamp: survivor.timestamp
+        });
       } else {
-        useStore.getState().addSurvivor(survivor);
+        store.addSurvivor(survivor);
       }
+      break;
+    }
+
+    case 'global_state_update': {
+      const data = message as unknown as {
+        type: string;
+        survivor: {
+          id: string;
+          x: number;
+          y: number;
+          z: number;
+          is_detected: boolean;
+          status: string;
+          detected_by_drone_id: string;
+          timestamp: number;
+        };
+      };
+      
+      const s = data.survivor;
+      useStore.getState().updateSurvivor(s.id, {
+        status: (s.status || (s.is_detected ? 'DETECTED' : 'TRAPPED')) as SurvivorStatus,
+        detected_by: s.detected_by_drone_id,
+        timestamp: s.timestamp,
+        position: { x: s.x, y: 0.3, z: s.z }
+      });
       break;
     }
     
@@ -409,7 +458,32 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
           x: number;
           y: number;
         };
+        survivors?: Array<{
+          id: string;
+          x: number;
+          y: number;
+          z: number;
+          is_detected: boolean;
+          detected_by_drone_id: string;
+          timestamp: number;
+        }>;
       };
+      
+      const store = useStore.getState();
+      
+      // Hydrate survivors from grid snapshot if available
+      if (data.survivors) {
+        const survivors: Survivor[] = data.survivors.map((s: any) => ({
+          id: s.id,
+          position: { x: s.x, y: 0.3, z: s.z },
+          status: (s.status || (s.is_detected ? 'DETECTED' : 'TRAPPED')) as SurvivorStatus,
+          confidence: s.is_detected ? 1 : 0,
+          thermalSignature: true,
+          timestamp: s.timestamp || Date.now(),
+          detected_by: s.detected_by_drone_id || '',
+        }));
+        store.setSurvivors(survivors);
+      }
       
       // DEBUG: Log command base if present
       if (data.command_base) {
@@ -453,19 +527,27 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         type: string;
         timestamp: number;
         buildings?: Building[];
-        survivors?: Array<{ id: string; x: number; y: number; z: number; status: string }>;
+        survivors?: Array<{
+          id: string;
+          x: number;
+          y: number;
+          z: number;
+          is_detected: boolean;
+          detected_by_drone_id: string;
+          timestamp: number;
+        }>;
       };
 
-      // Initialize survivors as UNDETECTED (blue) - Human component handles 3D model rendering
+      // Initialize/Hydrate survivors from server
       if (initData.survivors && initData.survivors.length > 0) {
-        const survivors: Survivor[] = initData.survivors.map(s => ({
+        const survivors: Survivor[] = initData.survivors.map((s: any) => ({
           id: s.id,
           position: { x: s.x, y: 0.3, z: s.z },
-          status: 'UNDETECTED' as SurvivorStatus,
-          confidence: 0,
-          thermalSignature: false,
-          timestamp: Date.now(),
-          detected_by: '',
+          status: (s.status || (s.is_detected ? 'DETECTED' : 'TRAPPED')) as SurvivorStatus,
+          confidence: s.is_detected ? 1 : 0,
+          thermalSignature: true,
+          timestamp: s.timestamp || Date.now(),
+          detected_by: s.detected_by_drone_id || '',
         }));
         useStore.getState().setSurvivors(survivors);
       }
@@ -496,6 +578,7 @@ const initialState = {
   heatTiles: {} as Record<string, number>,
   hoveredDroneId: null,
   missionRunning: false,
+  detectedSurvivorIds: new Set<string>(),
 };
 
 export const useStore = create<DroneStore>((set) => ({
@@ -513,18 +596,30 @@ export const useStore = create<DroneStore>((set) => ({
   
   setDrones: (drones) => set({ drones }),
   
+  updateDroneTransient: (drone) => {
+    updateDronesRef(drone);
+  },
+
   removeDrone: (droneId) => set((state) => {
     const newDrones = { ...state.drones };
     delete newDrones[droneId];
     return { drones: newDrones };
   }),
   
-  setSurvivors: (survivors) => set({ survivors }),
+  setSurvivors: (survivors) => set((state) => {
+    const newIds = new Set(survivors.filter(s => s.status !== 'TRAPPED').map(s => s.id));
+    return { survivors, detectedSurvivorIds: newIds };
+  }),
   
   addSurvivor: (survivor) =>
-    set((state) => ({
-      survivors: [...state.survivors, survivor],
-    })),
+    set((state) => {
+      const nextIds = new Set(state.detectedSurvivorIds);
+      nextIds.add(survivor.id);
+      return { 
+        survivors: [...state.survivors, survivor],
+        detectedSurvivorIds: nextIds
+      };
+    }),
   
   updateSurvivor: (id, updates) =>
     set((state) => ({

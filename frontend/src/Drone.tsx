@@ -4,7 +4,7 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { subscribeToDronePosition, sendMessage, useStore } from './store';
 import { useViewStore } from './viewStore';
-import type { DroneState, DroneStatus } from './store';
+import type { DroneState, DroneStatus, SphericalCoords } from './store';
 import { SENSOR_CONFIG } from './constants';
 
 // =============================================================================
@@ -53,19 +53,33 @@ export function Drone({ droneId }: DroneProps) {
   const currentPos = useRef(new THREE.Vector3(0, 10, 0));
   const currentRoll = useRef(0);
   const targetAzimuth = useRef(0);
-  const currentSpherical = useRef({ azimuth: 0, elevation: 0, fov: 60, scan_radius: 10 });
+  const currentSpherical = useRef<SphericalCoords>({ azimuth: 0, elevation: 0, fov: 60, scan_radius: 10 });
   const droneStatus = useRef<DroneStatus>('SCANNING');
   
   // Throttle & Optimization Refs
+  const { scene } = useThree();
+  
+  // Restore missing refs
   const lastDetectionTime = useRef(0);
   const detectedSurvivors = useRef<Set<string>>(new Set());
   const lastVisualUpdate = useRef({ fov: -1, alt: -1 });
   const lerpedFov = useRef(90);
   const spotlightTargetRef = useRef<THREE.Object3D>(null);
 
-  const raycaster = useMemo(() => new THREE.Raycaster(), []);
-  const downDirection = useMemo(() => new THREE.Vector3(0, -1, 0), []);
-  const { scene } = useThree();
+  // Performance Optimization: Cache survivor meshes to avoid scene traversal
+  const survivorMeshes = useMemo(() => {
+    const meshes: THREE.Mesh[] = [];
+    scene.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.userData.isSurvivor) {
+        meshes.push(obj);
+      }
+    });
+    return meshes;
+  }, [scene, useStore.getState().survivors.length]); 
+
+  // Scratch variables to prevent GC thrashing
+  const _raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const _downDir = useMemo(() => new THREE.Vector3(0, -1, 0), []);
 
   // Web Socket Subscription
   useEffect(() => {
@@ -191,16 +205,19 @@ export function Drone({ droneId }: DroneProps) {
     
     rotorRefs.current.forEach((r) => r && (r.rotation.y += 0.8));
 
-    // 7. RAYCAST DETECTION
+    // 7. RAYCAST DETECTION (Optimized)
     const now = state.clock.getElapsedTime();
     if (now - lastDetectionTime.current >= 1.0 && currentAlt > 3) {
-      raycaster.set(group.position, downDirection);
-      const meshes: THREE.Object3D[] = [];
-      scene.traverse((obj) => obj instanceof THREE.Mesh && meshes.push(obj));
-      const intersects = raycaster.intersectObjects(meshes, false);
+      _raycaster.set(group.position, _downDir);
+      
+      // Use cached survivor meshes instead of traversing the whole scene
+      const intersects = _raycaster.intersectObjects(survivorMeshes, false);
+      
       for (const intersect of intersects) {
-        if (intersect.object.userData.isSurvivor && intersect.distance <= spherical.scan_radius) {
+        if (intersect.distance <= spherical.scan_radius) {
           const sId = intersect.object.userData.survivorId || intersect.object.uuid;
+          
+          // O(1) lookup in transient ref
           if (!detectedSurvivors.current.has(sId)) {
             detectedSurvivors.current.add(sId);
             sendMessage({
@@ -208,7 +225,7 @@ export function Drone({ droneId }: DroneProps) {
               drone_id: droneId,
               survivor_id: sId,
               x: intersect.object.position.x,
-              y: intersect.object.position.z,
+              y: intersect.object.position.z, // Mapping Three.js Z to backend Y
               z: intersect.object.position.y,
               distance: intersect.distance,
               scan_radius: spherical.scan_radius,
@@ -301,13 +318,17 @@ export function Drone({ droneId }: DroneProps) {
 }
 
 /**
- * Drones Container 
+ * Drones Container - Optimized to only re-render when drone IDs change
  */
 export function Drones() {
-  const drones = useStore((state) => state.drones);
+  const droneIds = useStore((state) => Object.keys(state.drones).join(','));
+  const ids = useMemo(() => droneIds.split(','), [droneIds]);
+
+  if (!droneIds) return null;
+
   return (
     <>
-      {Object.keys(drones).map((id) => <Drone key={id} droneId={id} />)}
+      {ids.map((id) => (id ? <Drone key={id} droneId={id} /> : null))}
     </>
   );
 }

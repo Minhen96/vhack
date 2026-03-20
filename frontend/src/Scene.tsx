@@ -185,8 +185,8 @@ export function Scene() {
   return (
     <Canvas
       shadows
-      shadow-mapSize-width={2048}
-      shadow-mapSize-height={2048}
+      shadow-mapSize-width={1024}
+      shadow-mapSize-height={1024}
       camera={{
         position: [30, 25, 30],
         fov: 60,
@@ -218,8 +218,8 @@ export function Scene() {
         intensity={3}
         color="#ff7b00"
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
         shadow-camera-far={200}
         shadow-camera-left={-60}
         shadow-camera-right={60}

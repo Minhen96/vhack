@@ -7,7 +7,9 @@ const (
 	MessageTypeSurvivorDetected = "survivor_detected"
 	MessageTypeGridSnapshot     = "grid_snapshot"
 	MessageTypeGridUpdate       = "grid_update"
-	MessageTypeScanHeatmap      = "scan_heatmap" // drone → hub → UI: raw thermal readings for heatmap
+	MessageTypeScanHeatmap      = "scan_heatmap"      // drone → hub → UI: raw thermal readings for heatmap
+	MessageTypeGlobalStateUpdate = "global_state_update" // hub → UI: minimal diff for state change
+	MessageTypeDispatchAid      = "dispatch_aid"        // UI → hub: signal mission objective completion
 )
 
 // =============================================================================
@@ -59,13 +61,14 @@ type Spherical struct {
 
 // SurvivorDetected represents a survivor detection event from a drone
 type SurvivorDetected struct {
-	Type      string  `json:"type"`
-	DroneID   string  `json:"drone_id"`
-	Timestamp int64   `json:"timestamp"`
-	X         float64 `json:"x"`
-	Y         float64 `json:"y"`
-	Z         float64 `json:"z"`
+	Type       string  `json:"type"`
+	DroneID    string  `json:"drone_id"`
+	Timestamp  int64   `json:"timestamp"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Z          float64 `json:"z"`
 	Confidence float64 `json:"confidence"`
+	ID         string  `json:"id,omitempty"` // Persistence: Optional ID if already known
 }
 
 // =============================================================================
@@ -74,10 +77,29 @@ type SurvivorDetected struct {
 
 // GridSnapshot represents a complete grid state broadcast to all connected clients
 type GridSnapshot struct {
-	Type           string         `json:"type"`
-	Timestamp      int64          `json:"timestamp"`
-	Blocked        []BlockedArea  `json:"blocked"`
-	CommandBase    *CommandBase   `json:"command_base,omitempty"`
+	Type           string          `json:"type"`
+	Timestamp      int64           `json:"timestamp"`
+	Blocked        []BlockedArea   `json:"blocked"`
+	CommandBase    *CommandBase    `json:"command_base,omitempty"`
+	Survivors      []SurvivorState `json:"survivors,omitempty"` // Persistence: hydrated survivor list
+}
+
+// SurvivorState represents the persistent state of a survivor in the mission
+type SurvivorState struct {
+	ID                 string  `json:"id"`
+	X                  float64 `json:"x"`
+	Y                  float64 `json:"y"`
+	Z                  float64 `json:"z"`
+	IsDetected         bool    `json:"is_detected"`
+	Status             string  `json:"status"` // TRAPPED, DETECTED, AID_SENT
+	DetectedByDroneID  string  `json:"detected_by_drone_id,omitempty"`
+	Timestamp          int64   `json:"timestamp,omitempty"`
+}
+
+// GlobalStateUpdate represents a single survivor's state change for minimal bandwidth
+type GlobalStateUpdate struct {
+	Type     string        `json:"type"`
+	Survivor SurvivorState `json:"survivor"`
 }
 
 // CommandBase represents the Command Base coordinates where drones spawn

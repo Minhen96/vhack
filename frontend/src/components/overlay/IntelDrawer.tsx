@@ -9,7 +9,8 @@ import {
   Navigation, 
   Activity,
   AlertCircle,
-  Zap
+  Zap,
+  Package
 } from 'lucide-react';
 
 export const IntelDrawer: React.FC = () => {
@@ -110,6 +111,30 @@ export const IntelDrawer: React.FC = () => {
                   ))}
                </div>
             </div>
+
+            {/* Tactical Logistics Card */}
+            {(() => {
+              const survivors = useStore.getState().survivors;
+              const aidedTarget = survivors.find(s => 
+                s.status === 'AID_SENT' && 
+                Math.sqrt(Math.pow(s.position.x - drone.position.x, 2) + Math.pow(s.position.z - drone.position.z, 2)) < 3
+              );
+              
+              if (!aidedTarget) return null;
+
+              return (
+                <div className="p-3 bg-mission-success/10 rounded-xl border border-mission-success/20 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-mono text-mission-success uppercase font-bold tracking-widest">Active Logistics</span>
+                    <Package size={14} className="text-mission-success" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[16px] font-mono font-bold text-white/90">AID DISPATCHED</span>
+                    <span className="text-[10px] font-mono text-mission-success/60">TARGET: {aidedTarget.id}</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Alert Logs */}
             <div className="mt-auto">

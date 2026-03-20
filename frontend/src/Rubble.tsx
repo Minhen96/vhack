@@ -132,7 +132,83 @@ export function Rubble() {
       rotation: [number, number, number];
     }> = [];
     
-    // Use blocked areas if available
+    // 1. ALWAYS generate baseline random debris field (The "messy" view)
+    // Large concrete blocks
+    for (let i = 0; i < 40; i++) {
+      const position: [number, number, number] = [
+        (random() - 0.5) * 60,
+        random() * 0.4,
+        (random() - 0.5) * 60,
+      ];
+      
+      const scale: [number, number, number] = [
+        random() * 2.5 + 0.8,
+        random() * 1.5 + 0.4,
+        random() * 2.5 + 0.8,
+      ];
+      
+      concrete.push({
+        position,
+        scale,
+        rotation: [
+          (random() - 0.5) * 0.5,
+          random() * Math.PI * 2,
+          (random() - 0.5) * 0.5,
+        ],
+      });
+    }
+    
+    // Metal/rebar pieces
+    for (let i = 0; i < 25; i++) {
+      const position: [number, number, number] = [
+        (random() - 0.5) * 70,
+        random() * 0.3,
+        (random() - 0.5) * 70,
+      ];
+      
+      const scale: [number, number, number] = [
+        random() * 0.4 + 0.1,
+        random() * 2 + 0.5,
+        random() * 0.4 + 0.1,
+      ];
+      
+      metal.push({
+        position,
+        scale,
+        rotation: [
+          random() * Math.PI,
+          random() * Math.PI * 2,
+          random() * Math.PI * 0.5,
+        ],
+      });
+    }
+    
+    // Small debris fragments
+    for (let i = 0; i < 150; i++) {
+      const position: [number, number, number] = [
+        (random() - 0.5) * 80,
+        random() * 0.15,
+        (random() - 0.5) * 80,
+      ];
+      
+      const scale: [number, number, number] = [
+        random() * 0.6 + 0.1,
+        random() * 0.6 + 0.1,
+        random() * 0.6 + 0.1,
+      ];
+      
+      smallDebris.push({
+        position,
+        scale,
+        rotation: [
+          random() * Math.PI * 2,
+          random() * Math.PI * 2,
+          random() * Math.PI * 2,
+        ],
+      });
+    }
+    
+    // 2. ADD pieces from blocked areas on top
     if (blockedAreas && blockedAreas.length > 0) {
       blockedAreas.forEach((area: BlockedArea) => {
         const x = area.x;
@@ -153,123 +229,30 @@ export function Rubble() {
             const typeRoll = random();
             
             if (typeRoll < 0.7) {
-              // Large concrete chunk
               const scale = random() * 1.5 + 0.5;
               concrete.push({
                 position: [x + offsetX, scale * 0.4, z + offsetZ],
                 scale: [scale, scale * 0.6, scale],
-                rotation: [
-                  random() * Math.PI * 0.4,
-                  random() * Math.PI * 2,
-                  random() * Math.PI * 0.4,
-                ],
+                rotation: [random() * Math.PI * 0.4, random() * Math.PI * 2, random() * Math.PI * 0.4],
               });
             } else if (typeRoll < 0.9) {
-              // Metal/rebar piece
               const scale = random() * 1.2 + 0.3;
               metal.push({
                 position: [x + offsetX, scale * 0.3, z + offsetZ],
-                scale: [scale * 0.3, scale, scale * 0.3], // Elongated
-                rotation: [
-                  random() * Math.PI,
-                  random() * Math.PI * 2,
-                  random() * Math.PI,
-                ],
+                scale: [scale * 0.3, scale, scale * 0.3],
+                rotation: [random() * Math.PI, random() * Math.PI * 2, random() * Math.PI],
               });
             } else {
-              // Small debris
               const scale = random() * 0.5 + 0.15;
               smallDebris.push({
                 position: [x + offsetX, scale * 0.3, z + offsetZ],
                 scale: [scale, scale, scale],
-                rotation: [
-                  random() * Math.PI * 2,
-                  random() * Math.PI * 2,
-                  random() * Math.PI * 2,
-                ],
+                rotation: [random() * Math.PI * 2, random() * Math.PI * 2, random() * Math.PI * 2],
               });
             }
           }
         }
       });
-    }
-    
-    // Fallback: Generate random debris field for demo
-    if (concrete.length === 0 && metal.length === 0 && smallDebris.length === 0) {
-      // Large concrete blocks
-      for (let i = 0; i < 40; i++) {
-        const position: [number, number, number] = [
-          (random() - 0.5) * 60,
-          random() * 0.4,
-          (random() - 0.5) * 60,
-        ];
-        
-        const scale: [number, number, number] = [
-          random() * 2.5 + 0.8,
-          random() * 1.5 + 0.4,
-          random() * 2.5 + 0.8,
-        ];
-        
-        concrete.push({
-          position,
-          scale,
-          rotation: [
-            (random() - 0.5) * 0.5,
-            random() * Math.PI * 2,
-            (random() - 0.5) * 0.5,
-          ],
-        });
-      }
-      
-      // Metal/rebar pieces
-      for (let i = 0; i < 25; i++) {
-        const position: [number, number, number] = [
-          (random() - 0.5) * 70,
-          random() * 0.3,
-          (random() - 0.5) * 70,
-        ];
-        
-        const scale: [number, number, number] = [
-          random() * 0.4 + 0.1,
-          random() * 2 + 0.5,
-          random() * 0.4 + 0.1,
-        ];
-        
-        metal.push({
-          position,
-          scale,
-          rotation: [
-            random() * Math.PI,
-            random() * Math.PI * 2,
-            random() * Math.PI * 0.5,
-          ],
-        });
-      }
-      
-      // Small debris fragments
-      for (let i = 0; i < 150; i++) {
-        const position: [number, number, number] = [
-          (random() - 0.5) * 80,
-          random() * 0.15,
-          (random() - 0.5) * 80,
-        ];
-        
-        const scale: [number, number, number] = [
-          random() * 0.6 + 0.1,
-          random() * 0.6 + 0.1,
-          random() * 0.6 + 0.1,
-        ];
-        
-        smallDebris.push({
-          position,
-          scale,
-          rotation: [
-            random() * Math.PI * 2,
-            random() * Math.PI * 2,
-            random() * Math.PI * 2,
-          ],
-        });
-      }
     }
     
     return { concretePieces: concrete, metalPieces: metal, smallDebrisPieces: smallDebris };
@@ -519,19 +502,19 @@ export function Rubble() {
         receiveShadow
       />
       
-      {/* Instanced metal debris */}
+      {/* Instanced metal debris - optimized */}
       <instancedMesh
         ref={metalMeshRef}
         args={[metalGeometry, rustMetalMaterial, maxMetal]}
-        castShadow
+        castShadow={false}
         receiveShadow
       />
       
-      {/* Instanced small debris fragments */}
+      {/* Instanced small debris - optimized */}
       <instancedMesh
         ref={smallDebrisMeshRef}
         args={[smallDebrisGeometry, darkConcreteMaterial, maxSmallDebris]}
-        castShadow
+        castShadow={false}
         receiveShadow
       />
       

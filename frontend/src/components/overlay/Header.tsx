@@ -32,7 +32,7 @@ export const Header: React.FC = () => {
   }, []);
 
   const droneCount = Object.keys(drones).length;
-  const foundCount = survivors.filter(s => s.status !== 'UNDETECTED').length;
+  const foundCount = survivors.filter(s => s.status !== 'TRAPPED').length;
   const connectionColor = connectionStatus === 'connected' ? 'text-mission-accent' : 'text-mission-critical';
 
   return (
