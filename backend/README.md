@@ -9,6 +9,25 @@ The Commander is the high-level cognitive layer of the RESCUE-ALPHA system. It l
 
 The Commander operates as a **FastAPI-based MCP Server**. It manages an in-memory **Drone Registry** that catalogues every individual drone's UUID, type, and capabilities. The orchestration is performed by a LangChain-based ReAct agent utilizing Chain-of-Thought (CoT) reasoning.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666', 'lineColor': '#888' }}}%%
+sequenceDiagram
+    participant LLM as Commander (LLM)
+    participant MCP as MCP Server
+    participant Registry as Drone Registry
+    participant Drone as Drone Process
+
+    LLM->>MCP: Call tool: list_active_drones
+    MCP->>Registry: Query active units
+    Registry-->>MCP: Return [ID, Type, Status]
+    MCP-->>LLM: Return Fleet JSON
+
+    LLM->>MCP: Call tool: start_search(id)
+    MCP->>Drone: POST /search
+    Drone-->>MCP: 202 Accepted
+    MCP-->>LLM: Mission Started
+```
+
 ### Key Features
 - **Discovery Architecture**: Dynamically detects drones as they register on the network.
 - **MCP Tool Definitions**: Exposes 13+ low-level drone functions as simplified, high-level tools for the LLM.

@@ -9,6 +9,17 @@ The Map Engine is the industrial-grade synchronization backbone of the RESCUE-AL
 
 The engine utilizes a **Non-blocking I/O Hub** pattern inspired by high-frequency trading systems. It decouples message ingestion from broadcasting using Go channels and dropping-queue patterns to ensure zero-pressure telemetry—if a client (e.g., UI) falls behind, the hub drops stale frames rather than slowing down the real-time simulation.
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666', 'lineColor': '#888' }}}%%
+flowchart LR
+    D[Drone Swarm] -->|Ingest| H[Go Hub]
+    H -->|Queue| B{Broadcaster}
+    B -->|Fast Client| UI[Command Center]
+    B -->|Slow Client| X[Dropped Frame]
+    
+    style X color:#f00,stroke:#f00
+```
+
 ### Key Features
 - **Concurrent Client Handling**: Supports separate pools for `Drones` and `UI` clients.
 - **Dropping Queue Pattern**: Uses `buffered channels` to prevent slow-client backpressure.

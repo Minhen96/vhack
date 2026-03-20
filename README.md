@@ -31,6 +31,7 @@ The system enables a fleet of heterogeneous drones (Scanners and Delivery units)
 RESCUE-ALPHA operates on two primary planes: the **Telemetry Plane** (Spatial Synchronization) and the **Control Plane** (Autonomous Orchestration).
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#f5f5f5', 'primaryTextColor': '#333', 'primaryBorderColor': '#666', 'lineColor': '#888', 'secondaryColor': '#eee', 'tertiaryColor': '#f9f9f9' }}}%%
 flowchart TB
     subgraph UI_Layer ["1. The Command Center (Frontend)"]
         UI[React Three Fiber 3D Interface]
@@ -70,17 +71,16 @@ flowchart TB
     %% External AI
     Agent <-->|LLM API| LLM[External LLM Provider]
 
-    style UI_Layer fill:#1a1a1a,stroke:#333,color:#fff
-    style Hub_Layer fill:#002b36,stroke:#008b8b,color:#fff
-    style Swarm_Layer fill:#2c3e50,stroke:#34495e,color:#fff
-    style Agent_Layer fill:#2d1b4d,stroke:#5e2a84,color:#fff
+    %% Version-specific Styles for High Contrast
+    classDef layerStyle fill:none,stroke:#888,stroke-width:2px,stroke-dasharray: 5 5;
+    class UI_Layer,Hub_Layer,Swarm_Layer,Agent_Layer layerStyle;
 ```
 
 ### The Four Pillars
-1.  **[The Command Center (Frontend)](file:///d:/Projects/vhack/frontend/README.md)**: A React-based 3D digital twin of the disaster zone, featuring a triple-view camera system (Global, Follow, Pilot) and real-time thermal heatmap rendering.
-2.  **[The Map Engine (drone-sim-server)](file:///d:/Projects/vhack/drone-sim-server/README.md)**: A high-concurrency Golang WebSocket hub utilizing non-blocking I/O to handle 100Hz+ telemetry streams with zero backpressure.
-3.  **[The Swarm (drone-processes)](file:///d:/Projects/vhack/drone/README.md)**: Isolated Python processes simulating physical hardware, A* navigation, and 3D conical FOV (Field of View) thermal detection.
-4.  **[The Commander (backend)](file:///d:/Projects/vhack/backend/README.md)**: An LLM-powered orchestration engine that communicates via the Model Context Protocol (MCP) to manage the fleet as a set of autonomous tools.
+1.  **[The Command Center (Frontend)](frontend/README.md)**: A React-based 3D digital twin of the disaster zone, featuring a triple-view camera system (Global, Follow, Pilot) and real-time thermal heatmap rendering.
+2.  **[The Map Engine (drone-sim-server)](drone-sim-server/README.md)**: A high-concurrency Golang WebSocket hub utilizing non-blocking I/O to handle 100Hz+ telemetry streams with zero backpressure.
+3.  **[The Swarm (drone-processes)](drone/README.md)**: Isolated Python processes simulating physical hardware, A* navigation, and 3D conical FOV (Field of View) thermal detection.
+4.  **[The Commander (backend)](backend/README.md)**: An LLM-powered orchestration engine that communicates via the Model Context Protocol (MCP) to manage the fleet as a set of autonomous tools.
 
 ---
 
@@ -123,10 +123,10 @@ To ensure proper handshaking between nodes, start the services in the following 
 
 ## Component Deep Dives
 
-- **[Architecture & Orchestration (Backend)](file:///d:/Projects/vhack/backend/README.md)**
-- **[3D Visualization (Frontend)](file:///d:/Projects/vhack/frontend/README.md)**
-- **[Telemetry Hub (Go Sim Server)](file:///d:/Projects/vhack/drone-sim-server/README.md)**
-- **[Drone Simulation (Python Swarm)](file:///d:/Projects/vhack/drone/README.md)**
+- **[Architecture & Orchestration (Backend)](backend/README.md)**
+- **[3D Visualization (Frontend)](frontend/README.md)**
+- **[Telemetry Hub (Go Sim Server)](drone-sim-server/README.md)**
+- **[Drone Simulation (Python Swarm)](drone/README.md)**
 
 ---
 
