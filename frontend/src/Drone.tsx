@@ -62,7 +62,7 @@ export function Drone({ droneId }: DroneProps) {
   // Restore missing refs
   const lastDetectionTime = useRef(0);
   const detectedSurvivors = useRef<Set<string>>(new Set());
-  const lastVisualUpdate = useRef({ fov: -1, alt: -1, elevation: -999 });
+  const lastVisualUpdate = useRef({ fov: -1, alt: -1, elevation: -999, roll: -999 });
   const lerpedFov = useRef(90);
   const spotlightTargetRef = useRef<THREE.Object3D>(null);
 
@@ -170,11 +170,14 @@ export function Drone({ droneId }: DroneProps) {
     lerpedFov.current = THREE.MathUtils.lerp(lerpedFov.current, targetFov, SENSOR_CONFIG.FOV_LERP);
     const currentFov = lerpedFov.current;
 
-    // Throttle check: update if alt, FOV, or elevation changes
+    // Throttle check: update if alt, FOV, elevation, or roll changes.
+    // Roll must be included: when the visual group banks, cos(roll) < 1 reduces
+    // the effective vertical reach of the cone, lifting the base above ground.
     if (
       Math.abs(lastVisualUpdate.current.alt - currentAlt) > 0.05 ||
       Math.abs(lastVisualUpdate.current.fov - currentFov) > 0.1 ||
-      Math.abs(lastVisualUpdate.current.elevation - spherical.elevation) > 0.5
+      Math.abs(lastVisualUpdate.current.elevation - spherical.elevation) > 0.5 ||
+      Math.abs(lastVisualUpdate.current.roll - currentRoll.current) > 0.01
     ) {
       const fovRad = THREE.MathUtils.degToRad(currentFov);
       if (spotlightRef.current) {
@@ -189,13 +192,15 @@ export function Drone({ droneId }: DroneProps) {
         coneRef.current.rotation.x = Math.PI / 2 + elevationRad;
 
         // Cone length = slant distance from drone nose to ground.
-        // slant = altitude / |sin(elevation)| so the base circle lands on y=0.
-        // Cap when elevation is near-horizontal (sin → 0) to avoid infinite length.
+        // When the visual group rolls (Z-rotation), the vertical component of the
+        // cone shrinks by cos(roll), lifting the base above ground. Dividing by
+        // cos(roll) compensates so the base always reaches y = -0.5 (ground plane).
+        // Clamp cos(roll) ≥ 0.3 to prevent infinite length at extreme banking.
         const sinEl = Math.sin(elevationRad);
-        // +0.5 accounts for the visual ground plane being at y=-0.5 in the scene
-        const droneHeight = group.position.y + 0.5;
+        const cosRoll = Math.max(Math.cos(currentRoll.current), 0.3);
+        const droneHeight = group.position.y + 0.5; // +0.5: ground plane is at y=-0.5
         const coneLength = sinEl < -0.05
-          ? Math.min(droneHeight / Math.abs(sinEl), droneHeight * 10)
+          ? Math.min(droneHeight / (Math.abs(sinEl) * cosRoll), droneHeight * 10)
           : droneHeight * 2; // fallback for near-horizontal / upward cameras
 
         const radius = Math.tan(fovRad / 2) * coneLength;
@@ -207,7 +212,7 @@ export function Drone({ droneId }: DroneProps) {
         coneRef.current.position.y = (coneLength / 2) * Math.sin(elevationRad);
         coneRef.current.position.z = SENSOR_CONFIG.PIVOT_OFFSET[2] - (coneLength / 2) * Math.cos(elevationRad);
       }
-      lastVisualUpdate.current = { fov: currentFov, alt: currentAlt, elevation: spherical.elevation };
+      lastVisualUpdate.current = { fov: currentFov, alt: currentAlt, elevation: spherical.elevation, roll: currentRoll.current };
     }
 
     // 6. SENSOR OPACITY PULSE

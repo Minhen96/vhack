@@ -577,10 +577,14 @@ async def search_area(
         if drone.battery_critical:
             break
 
-        # Scan at this waypoint and report to backend coverage grid
+        # Scan at this waypoint and report to backend coverage grid.
+        # Mark the waypoint bucket and its 4 cardinal neighbours (±BUCKET_SIZE)
+        # so waypoints spaced > BUCKET_SIZE apart don't leave uncovered gaps
+        # between them (e.g. step=10, bucket=8 leaves x=-8..-1 unmarked).
         scan_result = await thermal_scan(drone, scan_radius)
         visited += 1
-        asyncio.create_task(_report_covered(wx, wy))
+        for _dx, _dy in [(0, 0), (-_BUCKET_SIZE, 0), (_BUCKET_SIZE, 0), (0, -_BUCKET_SIZE), (0, _BUCKET_SIZE)]:
+            asyncio.create_task(_report_covered(wx + _dx, wy + _dy))
 
         # Merge raw readings (keep highest temp per cell)
         for r in scan_result.raw_readings:

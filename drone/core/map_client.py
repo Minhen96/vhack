@@ -31,6 +31,9 @@ class MapEngineClient:
 
     def __init__(self) -> None:
         self._ws: WebSocketClientProtocol | None = None
+        # Drone ID stored here so reconnect logic can include it in the URL,
+        # allowing hub.go to track and broadcast the correct drone_id on disconnect.
+        self._drone_id: str = ""
 
         # Local cache of blocked (impassable) grid cells.
         # Populated by grid_snapshot on connect, then patched by grid_update messages.
@@ -64,14 +67,20 @@ class MapEngineClient:
         # Cached map bounds and base position fetched from sim server on first call.
         self._map_info: dict | None = None
 
-    async def connect(self) -> None:
+    async def connect(self, drone_id: str = "") -> None:
+        if drone_id:
+            self._drone_id = drone_id
+        # Include drone_id as a query param so hub.go can associate this WebSocket
+        # connection with the drone's real ID. Without this, hub.go generates a
+        # random ID and broadcasts drone_disconnected with the wrong ID on shutdown.
+        url = f"{MAP_WS_URL}?drone_id={self._drone_id}" if self._drone_id else MAP_WS_URL
         try:
             self._ws = await asyncio.wait_for(
-                websockets.connect(MAP_WS_URL), timeout=3.0
+                websockets.connect(url), timeout=3.0
             )
-            logger.info("Connected to Map Engine at %s", MAP_WS_URL)
+            logger.info("Connected to Map Engine at %s", url)
         except (OSError, asyncio.TimeoutError):
-            logger.warning("Map Engine not reachable at %s — running without map sync.", MAP_WS_URL)
+            logger.warning("Map Engine not reachable at %s — running without map sync.", url)
             self._ws = None
 
     async def _write_pump(self) -> None:

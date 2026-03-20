@@ -95,6 +95,35 @@ async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
     if result.status == "delivered":
         await map_client.send_aid_delivered(drone, body.x, body.y, body.z)
     await map_client.send_drone_status(drone)
+
+    # Auto-return to base if battery is low after delivery.
+    # Mirrors the start_search background task behaviour: push battery_low so the
+    # LLM agent knows, then autonomously navigate home and charge.
+    if drone.battery_low:
+        async def _auto_return() -> None:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"{MCP_URL}/internal/event",
+                        json={"type": "battery_low", "drone_id": drone.id, "battery": drone.battery},
+                        timeout=3.0,
+                    )
+            except Exception:
+                logger.warning("deliver: failed to push battery_low event for %s", drone.id)
+
+            async def _on_waypoint(d: Drone, step_dist: int) -> None:
+                await map_client.send_position(d, step_dist)
+                await map_client.send_drone_status(d)
+                await asyncio.sleep(0.1)
+
+            async def _on_tick(d: Drone) -> None:
+                await map_client.send_drone_status(d)
+
+            await return_to_base(drone, on_waypoint=_on_waypoint, on_tick=_on_tick)
+            await map_client.send_drone_status(drone)
+
+        asyncio.create_task(_auto_return())
+
     return result
 
 

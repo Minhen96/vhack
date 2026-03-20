@@ -30,7 +30,8 @@ async def lifespan(_app: FastAPI):
     await register_to_mcp()
 
     # 3. Connect WebSocket to Map Engine and announce presence
-    await map_client.connect()
+    # Pass the drone ID so hub.go registers the correct ID for disconnect events.
+    await map_client.connect(drone.id)
     await map_client.send_init_connection(drone)
 
     # 4. Start listening for incoming messages from map engine (grid_snapshot, grid_update)
