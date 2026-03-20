@@ -29,6 +29,16 @@ export interface DroneState {
   battery: number; // 0-100 percentage
   eta_ms: number;
   timestamp: number;
+  drone_type?: string; // 'scanner' | 'delivery'
+}
+
+/** Single recorded position snapshot for mission playback */
+export interface PathPoint {
+  x: number;
+  y: number;  // altitude (Three.js Y)
+  z: number;  // ground plane (Three.js Z)
+  timestamp: number;
+  status: string;
 }
 
 /** Survivor/thermal signature detection */
@@ -133,8 +143,17 @@ interface DroneStore {
   // Optimized detection tracking
   detectedSurvivorIds: Set<string>;
 
+  // Drone type registry (captured from init_connection)
+  droneTypes: Record<string, string>;
+
+  // Mission path history for Strava-style playback (capped at 500 pts/drone)
+  pathHistory: Record<string, PathPoint[]>;
+
   // Actions
   setConnectionStatus: (status: ConnectionStatus) => void;
+  setDroneType: (droneId: string, type: string) => void;
+  appendPath: (droneId: string, point: PathPoint) => void;
+  clearPathHistory: () => void;
   setDrone: (drone: DroneState) => void;
   setDrones: (drones: Record<string, DroneState>) => void;
   updateDroneTransient: (drone: DroneState) => void; // New transient-only action
@@ -256,6 +275,9 @@ let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelay = 1000;
 const maxReconnectDelay = 30000;
 
+// Per-drone path sample counters — sample every 5th position update to keep pathHistory lean
+const _pathSampleCounters: Record<string, number> = {};
+
 export function connectWebSocket(url?: string): void {
   const wsUrl = url || import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws/ui';
 
@@ -359,6 +381,7 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         battery?: number;
         eta_ms: number;
         timestamp: number;
+        drone_type?: string;
       };
       
       // Backend Z (altitude) maps to Three.js Y
@@ -376,18 +399,40 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         timestamp: data.timestamp,
       };
       
+      // Update drone type registry whenever a type is present in the message
+      if (data.drone_type) {
+        useStore.getState().setDroneType(data.drone_id, data.drone_type);
+        drone.drone_type = data.drone_type;
+      } else {
+        // Fall back to cached registry value (e.g. set by init_connection)
+        const existingType = useStore.getState().droneTypes[data.drone_id];
+        if (existingType) drone.drone_type = existingType;
+      }
+
       // Update transient ref for high-frequency 3D updates (NO React re-render)
       updateDronesRef(drone);
-      
+
       // Update React state ONLY if status/battery or critical info changed
       // This keeps the Overlay/UI responsive without 60FPS re-renders
       const prevState = useStore.getState().drones[drone.drone_id];
-      const shouldUpdateState = !prevState || 
-                                prevState.status !== drone.status || 
+      const shouldUpdateState = !prevState ||
+                                prevState.status !== drone.status ||
                                 Math.abs(prevState.battery - drone.battery) > 1;
 
       if (shouldUpdateState) {
         useStore.getState().setDrone(drone);
+      }
+
+      // Sample path every 5th update for Strava-style playback
+      _pathSampleCounters[data.drone_id] = (_pathSampleCounters[data.drone_id] ?? 0) + 1;
+      if (_pathSampleCounters[data.drone_id] % 5 === 0) {
+        useStore.getState().appendPath(data.drone_id, {
+          x: drone.position.x,
+          y: drone.position.y,
+          z: drone.position.z,
+          timestamp: data.timestamp,
+          status: drone.status,
+        });
       }
       break;
     }
@@ -554,6 +599,8 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
         case 'init_connection': {
       const initData = message as unknown as {
         type: string;
+        drone_id?: string;
+        drone_type?: string;
         timestamp: number;
         buildings?: Building[];
         survivors?: Array<{
@@ -566,6 +613,11 @@ function handleWebSocketMessage(message: WebSocketMessage): void {
           timestamp: number;
         }>;
       };
+
+      // Register drone type so FleetSidebar can show scanner vs delivery icon
+      if (initData.drone_id && initData.drone_type) {
+        useStore.getState().setDroneType(initData.drone_id, initData.drone_type);
+      }
 
       // Initialize/Hydrate survivors from server
       if (initData.survivors && initData.survivors.length > 0) {
@@ -623,6 +675,8 @@ const initialState = {
   hoveredDroneId: null,
   missionRunning: false,
   detectedSurvivorIds: new Set<string>(),
+  droneTypes: {} as Record<string, string>,
+  pathHistory: {} as Record<string, PathPoint[]>,
 };
 
 export const useStore = create<DroneStore>((set) => ({
@@ -630,7 +684,19 @@ export const useStore = create<DroneStore>((set) => ({
   
   // Actions
   setConnectionStatus: (status) => set({ connectionStatus: status }),
-  
+
+  setDroneType: (droneId, type) => set((state) => ({
+    droneTypes: { ...state.droneTypes, [droneId]: type },
+  })),
+
+  appendPath: (droneId, point) => set((state) => {
+    const existing = state.pathHistory[droneId] ?? [];
+    const capped = existing.length >= 500 ? existing.slice(-499) : existing;
+    return { pathHistory: { ...state.pathHistory, [droneId]: [...capped, point] } };
+  }),
+
+  clearPathHistory: () => set({ pathHistory: {} }),
+
   setDrone: (drone) => set((state) => ({
     drones: {
       ...state.drones,

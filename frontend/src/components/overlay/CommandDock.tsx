@@ -10,13 +10,18 @@ import {
   Anchor,
   Terminal,
   CirclePlay,
-  Crosshair
+  Crosshair,
+  Film,
+  Square,
 } from 'lucide-react';
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 export const CommandDock: React.FC = () => {
   const { missionRunning, setMissionRunning } = useStore();
-  const { setTerminalOpen, triggerResetView } = useViewStore();
+  const { setTerminalOpen, triggerResetView, setPlaybackOpen } = useViewStore();
   const [muted, setMuted] = React.useState(false);
+  const [stopping, setStopping] = React.useState(false);
 
   const handleRecall = async () => {
     if (confirm('Initiate emergency fleet recall to base?')) {
@@ -24,18 +29,26 @@ export const CommandDock: React.FC = () => {
     }
   };
 
+  const handleStopMission = async () => {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await fetch(`${BACKEND_URL}/api/mission/stop`, { method: 'POST' });
+      // missionRunning will be set to false by the Overlay polling when agent stops
+    } catch {
+      // best-effort
+    } finally {
+      setStopping(false);
+    }
+  };
+
   return (
     <div className="fixed bottom-10 left-1/2 -translate-x-3/5 z-50 pointer-events-none select-none">
-      <motion.div 
+      <motion.div
         initial={{ y: 50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         className="glass-panel rounded-full px-2 py-1.5 flex items-center gap-1 shadow-[0_10px_40px_rgba(0,0,0,0.5)] pointer-events-auto"
       >
-        <div className="flex items-center gap-1 px-3 border-r border-white/5 h-8">
-           <Navigation size={14} className="text-mission-accent" />
-           <span className="text-[10px] font-bold font-mono tracking-widest text-white/50 uppercase">Dock</span>
-        </div>
-
         <div className="flex items-center gap-1 px-2">
           <button
             onClick={() => setTerminalOpen(true)}
@@ -48,29 +61,32 @@ export const CommandDock: React.FC = () => {
 
           <div className="w-[1px] h-4 bg-white/5 mx-1" />
 
-          <button
-            onClick={() => !missionRunning && setTerminalOpen(true)}
-            disabled={missionRunning}
-            className={`
-              flex items-center gap-2 px-5 py-2 rounded-full transition-all active:scale-95 font-bold
-              ${missionRunning
-                ? 'bg-mission-accent/20 text-mission-accent border border-mission-accent/30 cursor-not-allowed'
-                : 'bg-mission-accent text-black hover:brightness-110 shadow-[0_0_20px_rgba(34,211,238,0.35)]'}
-            `}
-            title="Start Mission [/]"
-          >
-            {missionRunning ? (
-              <>
-                <div className="w-2 h-2 rounded-full bg-mission-accent animate-ping" />
-                <span className="text-[10px] uppercase tracking-wider">Mission Active</span>
-              </>
-            ) : (
-              <>
-                <CirclePlay size={16} />
-                <span className="text-[10px] uppercase tracking-wider">Start Mission</span>
-              </>
-            )}
-          </button>
+          {missionRunning ? (
+            <button
+              onClick={handleStopMission}
+              disabled={stopping}
+              className="flex items-center gap-2 px-5 py-2 rounded-full transition-all active:scale-95 font-bold bg-mission-critical/20 text-mission-critical border border-mission-critical/40 hover:bg-mission-critical/30 shadow-[0_0_20px_rgba(239,68,68,0.2)]"
+              title="Stop Mission"
+            >
+              {stopping ? (
+                <div className="w-2 h-2 rounded-full bg-mission-critical animate-ping" />
+              ) : (
+                <Square size={14} fill="currentColor" />
+              )}
+              <span className="text-[10px] uppercase tracking-wider">
+                {stopping ? 'Stopping...' : 'Stop Mission'}
+              </span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setTerminalOpen(true)}
+              className="flex items-center gap-2 px-5 py-2 rounded-full transition-all active:scale-95 font-bold bg-mission-accent text-black hover:brightness-110 shadow-[0_0_20px_rgba(34,211,238,0.35)]"
+              title="Start Mission [/]"
+            >
+              <CirclePlay size={16} />
+              <span className="text-[10px] uppercase tracking-wider">Start Mission</span>
+            </button>
+          )}
 
           <button
             onClick={handleRecall}
@@ -92,18 +108,11 @@ export const CommandDock: React.FC = () => {
           </button>
 
           <button
-            className="p-2 rounded-full hover:bg-white/10 text-white/40 hover:text-white transition-all"
-            title="Toggle Tactical Grid [G]"
+            onClick={() => setPlaybackOpen(true)}
+            className="p-2 rounded-full hover:bg-white/10 text-white/40 hover:text-mission-accent transition-all"
+            title="Mission Playback"
           >
-            <Map size={18} />
-          </button>
-
-          <button
-            onClick={() => setMuted(!muted)}
-            className={`p-2 rounded-full transition-all ${muted ? 'text-mission-alert bg-mission-alert/10' : 'text-white/40 hover:bg-white/10 hover:text-white'}`}
-            title={muted ? 'Unmute Alerts [M]' : 'Mute Alerts [M]'}
-          >
-            {muted ? <BellOff size={18} /> : <Bell size={18} />}
+            <Film size={18} />
           </button>
         </div>
       </motion.div>

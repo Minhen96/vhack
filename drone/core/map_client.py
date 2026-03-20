@@ -291,6 +291,7 @@ class MapEngineClient:
             "status": drone.status.value.upper(),
             "battery": drone.battery,
             "eta_ms": distance * 200,  # expected animation duration (200ms per cell)
+            "drone_type": drone.type.value,  # included so cached replay carries type info
         })
 
     async def send_drone_status(self, drone: Drone) -> None:

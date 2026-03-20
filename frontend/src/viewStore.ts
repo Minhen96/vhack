@@ -7,6 +7,7 @@ interface ViewState {
   selectedDroneId: string | null;
   highDensity: boolean;
   isTerminalOpen: boolean;
+  isPlaybackOpen: boolean;
   resetViewTrigger: number;
 
   // Actions
@@ -16,6 +17,7 @@ interface ViewState {
   setSelectedDroneId: (id: string | null) => void;
   toggleHighDensity: () => void;
   setTerminalOpen: (open: boolean) => void;
+  setPlaybackOpen: (open: boolean) => void;
   triggerResetView: () => void;
 }
 
@@ -24,6 +26,7 @@ export const useViewStore = create<ViewState>((set) => ({
   selectedDroneId: null,
   highDensity: false,
   isTerminalOpen: false,
+  isPlaybackOpen: false,
   resetViewTrigger: 0,
 
   setGlobalView: () => set({ 
@@ -51,6 +54,10 @@ export const useViewStore = create<ViewState>((set) => ({
 
   setTerminalOpen: (open: boolean) => set({
     isTerminalOpen: open
+  }),
+
+  setPlaybackOpen: (open: boolean) => set({
+    isPlaybackOpen: open
   }),
 
   triggerResetView: () => set((state) => ({

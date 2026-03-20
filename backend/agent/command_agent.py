@@ -8,6 +8,7 @@ LangChain with chain-of-thought reasoning.
 All communication with drones flows through the Model Context Protocol.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -249,6 +250,12 @@ def get_mission_log() -> dict[str, Any] | None:
     }
 
 
+def force_stop() -> None:
+    """Immediately mark the mission as not running (called from stop endpoint)."""
+    global _is_running  # noqa: PLW0603
+    _is_running = False
+
+
 # ---------------------------------------------------------------------------
 # Mission runner
 # ---------------------------------------------------------------------------
@@ -356,6 +363,15 @@ async def run_mission(objective: str) -> dict[str, Any]:
                     "output": output,
                     "log": log.to_list(),
                 }
+
+    except asyncio.CancelledError:
+        logger.info("Mission cancelled by operator.")
+        log.add("mission_stopped", {"message": "Mission stopped by operator."})
+        _is_running = False
+        return {
+            "status": "stopped",
+            "log": log.to_list(),
+        }
 
     except Exception as e:
         logger.exception("Mission failed")

@@ -6,10 +6,11 @@ REST endpoints for starting, monitoring, and resetting rescue missions.
 
 import asyncio
 
+import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from backend.agent.command_agent import get_mission_log, run_mission
+from backend.agent.command_agent import force_stop, get_mission_log, run_mission
 from backend.core.drone_registry import registry
 
 router = APIRouter(prefix="/api/mission", tags=["mission"])
@@ -107,16 +108,38 @@ async def mission_result():
 
 @router.post("/stop")
 async def stop_mission():
-    """Signal the running mission to stop gracefully."""
-    from backend.agent.command_agent import get_mission_log
-    from backend.events import push as push_event
+    """Immediately stop the running mission and return all drones to base."""
+    global _background_task  # noqa: PLW0603
 
-    log = get_mission_log()
-    if log is None or not log.get("is_running"):
+    log_data = get_mission_log()
+    if log_data is None or not log_data.get("is_running"):
         return {"status": "error", "error": "No mission is currently running."}
 
-    await push_event({"type": "mission_stop"})
-    return {"status": "ok", "message": "Stop signal sent. Mission will finish current operations and halt."}
+    # 1. Mark stopped immediately so frontend polling detects it right away
+    force_stop()
+
+    # 2. Cancel the LLM background task
+    if _background_task and not _background_task.done():
+        _background_task.cancel()
+
+    # 3. Recall all drones to base (fire-and-forget so endpoint returns fast)
+    drones = registry.get_all()
+
+    async def _recall_all() -> None:
+        async with httpx.AsyncClient() as client:
+            tasks = [
+                client.post(
+                    f"http://{d.host}:{d.port}/drones/{d.drone_id}/force_return",
+                    timeout=5.0,
+                )
+                for d in drones
+                if d.host and d.port
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.create_task(_recall_all())
+
+    return {"status": "ok", "message": "Mission stopped. All drones returning to base."}
 
 
 # --------------------------------------------------------------------------

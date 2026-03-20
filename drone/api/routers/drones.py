@@ -318,6 +318,36 @@ async def start_search(drone_id: str, body: SearchRequest) -> dict:
     return {"started": True, "drone_id": drone_id}
 
 
+@router.post("/{drone_id}/force_return")
+async def force_return(drone_id: str) -> dict:
+    """Cancel any active search and immediately return to base.
+
+    Called by the backend when the operator stops the mission.
+    Returns immediately — return-to-base runs as a background task.
+    """
+    drone = _lookup(drone_id)
+
+    # Cancel any active search task so it doesn't interfere with the return trip
+    task = _active_searches.get(drone_id)
+    if task and not task.done():
+        task.cancel()
+
+    async def _do_return() -> None:
+        async def on_waypoint(d: Drone, step_dist: int) -> None:
+            await map_client.send_position(d, step_dist)
+            await map_client.send_drone_status(d)
+            await asyncio.sleep(0.1)
+
+        async def on_tick(d: Drone) -> None:
+            await map_client.send_drone_status(d)
+
+        await return_to_base(drone, on_waypoint=on_waypoint, on_tick=on_tick)
+        await map_client.send_drone_status(drone)
+
+    asyncio.create_task(_do_return())
+    return {"ok": True, "drone_id": drone_id}
+
+
 @router.get("/{drone_id}/battery", response_model=BatteryResult)
 async def battery(drone_id: str) -> BatteryResult:
     drone = _lookup(drone_id)

@@ -2,14 +2,15 @@ import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../../store';
 import { useViewStore } from '../../viewStore';
-import { 
-  Eye, 
-  Navigation, 
-  Home, 
-  Battery, 
+import {
+  Eye,
+  Navigation,
+  Home,
+  Battery,
   Wind,
   Activity,
-  Package
+  Package,
+  ScanLine,
 } from 'lucide-react';
 
 const AltitudeSparkline: React.FC<{ data: number[] }> = ({ data }) => {
@@ -46,6 +47,7 @@ const AltitudeSparkline: React.FC<{ data: number[] }> = ({ data }) => {
 
 const DroneCard: React.FC<{ droneId: string }> = ({ droneId }) => {
   const drone = useStore((state) => state.drones[droneId]);
+  const droneType = useStore((state) => state.droneTypes[droneId]);
   const { setFollowView, setPilotView, selectedDroneId } = useViewStore();
   const setHoveredDroneId = useStore((state) => state.setHoveredDroneId);
   const isSelected = selectedDroneId === droneId;
@@ -86,6 +88,18 @@ const DroneCard: React.FC<{ droneId: string }> = ({ droneId }) => {
           <span className="text-[10px] font-bold font-mono tracking-tighter text-white/90">
             DRN-{droneId.slice(-4).toUpperCase()}
           </span>
+          {droneType === 'scanner' && (
+            <div className="flex items-center gap-1 bg-blue-500/20 text-blue-300 border border-blue-400/30 px-1.5 py-0.5 rounded-full">
+              <ScanLine size={8} />
+              <span className="text-[8px] font-bold">SCAN</span>
+            </div>
+          )}
+          {droneType === 'delivery' && (
+            <div className="flex items-center gap-1 bg-amber-500/20 text-amber-300 border border-amber-400/30 px-1.5 py-0.5 rounded-full">
+              <Package size={8} />
+              <span className="text-[8px] font-bold">DELV</span>
+            </div>
+          )}
           {isAiding && (
             <div className="flex items-center gap-1 bg-mission-success/20 text-mission-success border border-mission-success/30 px-1.5 py-0.5 rounded-full animate-pulse">
               <Package size={8} />

@@ -8,6 +8,7 @@ import CommandDock from './components/overlay/CommandDock';
 import CommandInput from './components/overlay/CommandInput';
 import ControlsHelp from './components/overlay/ControlsHelp';
 import HUD from './components/overlay/HUD';
+import PlaybackModal from './components/overlay/PlaybackModal';
 import { useStore } from './store';
 import { useViewStore } from './viewStore';
 
@@ -19,14 +20,37 @@ import { useViewStore } from './viewStore';
  * - Dynamic Right-Panel (Intel Drawer <-> Mission Log)
  * - Cleaned footer and metadata alignment.
  */
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+
 export const Overlay: React.FC = () => {
   const missionRunning = useStore((state) => state.missionRunning);
-  const { 
-    highDensity, 
-    selectedDroneId, 
-    isTerminalOpen, 
-    setTerminalOpen 
+  const setMissionRunning = useStore((state) => state.setMissionRunning);
+  const {
+    highDensity,
+    selectedDroneId,
+    isTerminalOpen,
+    setTerminalOpen,
   } = useViewStore();
+
+  // Poll mission status while running — auto-open terminal when complete
+  useEffect(() => {
+    if (!missionRunning) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/mission/log`);
+        const data = await res.json();
+        if (data.is_running === false) {
+          setMissionRunning(false);
+          setTerminalOpen(true); // prompt user for next mission
+        }
+      } catch {
+        // ignore transient network errors
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [missionRunning, setMissionRunning, setTerminalOpen]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -101,9 +125,12 @@ export const Overlay: React.FC = () => {
       </div>
       
       <ControlsHelp />
-      
+
       {/* 7. Dynamic Overlays: HUD (FPV / Follow Modes) */}
       <HUD />
+
+      {/* 8. Mission Playback Modal */}
+      <PlaybackModal />
     </div>
   );
 };
