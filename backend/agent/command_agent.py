@@ -278,11 +278,13 @@ async def run_mission(objective: str) -> dict[str, Any]:
     # that accumulated before this mission began.
     from backend.events import clear as clear_events
     from backend.coverage import coverage
+    from backend.main import _known_survivors
     discarded = clear_events()
     if discarded:
         log.add("system", {"message": f"Flushed {discarded} stale event(s) from queue."})
     coverage.reset()
-    log.add("system", {"message": "Coverage grid reset for new mission."})
+    _known_survivors.clear()
+    log.add("system", {"message": "Coverage grid and known survivors reset for new mission."})
 
     mcp_url = os.getenv("MCP_URL", "http://localhost:8000/mcp/mcp")
 

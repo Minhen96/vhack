@@ -40,6 +40,21 @@ logger = logging.getLogger(__name__)
 _BUCKET_SIZE = SCAN_RADIUS_DEFAULT  # must match backend/coverage.py BUCKET_SIZE
 _MAX_ROLL_DEG = 22.5  # max bank angle in degrees (matches frontend PI/8)
 
+# ---------------------------------------------------------------------------
+# Local coverage cache
+# ---------------------------------------------------------------------------
+# Tracks covered buckets within this drone process.  Supplements the backend
+# coverage store — even if HTTP reports fail, the drone won't rescan locally-
+# known buckets.  Cleared automatically when the backend coverage is empty
+# (indicating a fresh mission was started).
+_local_covered: set[tuple[int, int]] = set()
+
+
+def reset_local_coverage() -> None:
+    """Clear the local coverage cache (call at mission reset)."""
+    global _local_covered
+    _local_covered.clear()
+
 
 async def _fetch_covered_buckets() -> set[tuple[int, int]]:
     """Query the backend for already-covered grid buckets (one call per search start)."""
@@ -532,7 +547,11 @@ async def search_area(
 
     all_waypoints = _snake_waypoints(x1, y1, x2, y2, step, start_x=drone.x, start_y=drone.y)
     # Query backend once for covered buckets — survives drone disconnect/reconnect
-    covered_buckets = await _fetch_covered_buckets()
+    backend_covered = await _fetch_covered_buckets()
+    # If backend is empty it means a fresh mission was started — clear local cache too
+    if not backend_covered:
+        _local_covered.clear()
+    covered_buckets = backend_covered | _local_covered
     waypoints = [(wx, wy) for wx, wy in all_waypoints if _bucket(wx, wy) not in covered_buckets]
     logger.info(
         "search_area: %s — %d/%d waypoints uncovered (skipping %d already scanned)",
@@ -584,7 +603,9 @@ async def search_area(
         scan_result = await thermal_scan(drone, scan_radius)
         visited += 1
         for _dx, _dy in [(0, 0), (-_BUCKET_SIZE, 0), (_BUCKET_SIZE, 0), (0, -_BUCKET_SIZE), (0, _BUCKET_SIZE)]:
-            asyncio.create_task(_report_covered(wx + _dx, wy + _dy))
+            bx, by = wx + _dx, wy + _dy
+            _local_covered.add(_bucket(bx, by))  # immediate local dedup
+            asyncio.create_task(_report_covered(bx, by))
 
         # Merge raw readings (keep highest temp per cell)
         for r in scan_result.raw_readings:
@@ -663,6 +684,32 @@ async def deliver_aid(
             delivered_to=Position(**drone.position),
             battery_remaining_pct=drone.battery,
             message=f"Battery low ({drone.battery:.1f}%) — return to base to charge before delivering.",
+        )
+
+    # Round-trip feasibility check — ensure drone can reach target, deliver, AND return home.
+    from drone.core.map_client import map_client as _mc
+    _info = await _mc.fetch_map_info()
+    _base_x = int(_info.get("base_x", BASE_X))
+    _base_y = int(_info.get("base_y", BASE_Y))
+    _move_cost = _manhattan(drone.x, drone.y, x, y) * BATTERY_DRAIN_PER_CELL
+    _return_cost = _manhattan(x, y, _base_x, _base_y) * BATTERY_DRAIN_PER_CELL
+    _projected = drone.battery - _move_cost - BATTERY_DRAIN_DELIVER - _return_cost
+    if _projected < BATTERY_CRITICAL_THRESHOLD:
+        logger.warning(
+            "deliver_aid refused — insufficient battery (%.1f%%) for round-trip to (%d,%d) "
+            "(projected %.1f%% after delivery + return)",
+            drone.battery, x, y, _projected,
+        )
+        return DeliverResult(
+            drone_id=drone.id,
+            success=False,
+            status="failed",
+            delivered_to=Position(**drone.position),
+            battery_remaining_pct=drone.battery,
+            message=(
+                f"Insufficient battery ({drone.battery:.1f}%) for round-trip delivery to ({x},{y}). "
+                "Return to base and recharge first."
+            ),
         )
 
     drone.status = DroneStatus.DELIVERING

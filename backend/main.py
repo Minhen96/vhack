@@ -21,6 +21,10 @@ from backend.coverage import coverage
 from backend.events import push as push_event
 from backend.mcp.server import mcp
 
+# Deduplicate survivor_found events — same (x, y) is only queued once per mission.
+# Cleared alongside coverage at mission start (see command_agent.py: clear_events + coverage.reset).
+_known_survivors: set[tuple[int, int]] = set()
+
 # Create the MCP sub-app first so the session_manager becomes available
 mcp_app = mcp.streamable_http_app()
 
@@ -59,7 +63,14 @@ app.mount("/mcp", mcp_app)
 @app.post("/internal/event")
 async def receive_drone_event(request: Request) -> dict:
     """Receive push events from drone processes and forward to the event queue."""
+    global _known_survivors
     event = await request.json()
+    # Deduplicate survivor_found — same grid cell only forwarded to LLM once per mission
+    if event.get("type") == "survivor_found":
+        key = (int(round(event.get("x", 0))), int(round(event.get("y", 0))))
+        if key in _known_survivors:
+            return {"received": True, "skipped": True, "reason": "duplicate survivor location"}
+        _known_survivors.add(key)
     await push_event(event)
     return {"received": True}
 
@@ -81,8 +92,10 @@ def get_coverage() -> dict:
 
 @app.post("/coverage/reset")
 def reset_coverage() -> dict:
-    """Clear all coverage data — call at the start of a new mission."""
+    """Clear all coverage data and known survivors — call at the start of a new mission."""
+    global _known_survivors
     coverage.reset()
+    _known_survivors.clear()
     return {"ok": True}
 
 

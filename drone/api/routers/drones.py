@@ -122,20 +122,20 @@ async def deliver(drone_id: str, body: DeliverRequest) -> DeliverResult:
         await map_client.send_position(drone)
     await map_client.send_drone_status(drone)
 
-    # Auto-return to base if battery is low (includes refusal case: battery was
-    # already low before delivery was attempted, drone didn't move but still needs
-    # to return to charge).
-    if drone.battery_low:
+    # Always return to base after delivery — drone should not idle at the survivor location.
+    # If battery is also low, push a battery_low event so the LLM is aware.
+    if result.status == "delivered" or drone.battery_low:
         async def _auto_return() -> None:
-            try:
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"{MCP_URL}/internal/event",
-                        json={"type": "battery_low", "drone_id": drone.id, "battery": drone.battery},
-                        timeout=3.0,
-                    )
-            except Exception:
-                logger.warning("deliver: failed to push battery_low event for %s", drone.id)
+            if drone.battery_low:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(
+                            f"{MCP_URL}/internal/event",
+                            json={"type": "battery_low", "drone_id": drone.id, "battery": drone.battery},
+                            timeout=3.0,
+                        )
+                except Exception:
+                    logger.warning("deliver: failed to push battery_low event for %s", drone.id)
 
             async def _on_waypoint(d: Drone, step_dist: int) -> None:
                 await map_client.send_position(d, step_dist)
