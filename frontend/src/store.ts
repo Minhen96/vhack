@@ -173,6 +173,25 @@ export function getDronesRef(): Record<string, DroneState> {
 }
 
 /**
+ * Global registry for Three.js Drone Objects.
+ * Allows components (like CameraController) to access world-space 
+ * position/rotation of drones without React re-renders.
+ */
+const droneObjectMap: Record<string, any> = {};
+
+export function registerDroneObject(id: string, obj: any) {
+  droneObjectMap[id] = obj;
+}
+
+export function unregisterDroneObject(id: string) {
+  delete droneObjectMap[id];
+}
+
+export function getDroneObject(id: string): any | null {
+  return droneObjectMap[id] || null;
+}
+
+/**
  * Get a specific drone by ID
  */
 export function getDroneRef(droneId: string): DroneState | null {
