@@ -24,6 +24,19 @@
 
 The system enables a fleet of heterogeneous drones (Scanners and Delivery units) to systematically search for human heat signatures in rubble fields, navigate complex obstacles using A* pathfinding, and deliver life-saving aid—all without human intervention.
 
+## Screenshots
+### Insert Command
+<img width="1913" height="1075" alt="Image" src="https://github.com/user-attachments/assets/02c4151f-f143-406d-ad0c-45cf2af61728" />
+
+### Start Searching
+<img width="1913" height="1076" alt="Image" src="https://github.com/user-attachments/assets/dc3b81bb-3f7c-4bfa-8a56-f77136764d1d" />
+
+### Drone POV
+<img width="1910" height="1069" alt="Image" src="https://github.com/user-attachments/assets/1c0895e2-106c-4fa6-9507-eeedd9ddfbd8" />
+
+### Mission Playback
+<img width="1915" height="1074" alt="Image" src="https://github.com/user-attachments/assets/473c91ea-50ef-4bac-9837-098a97f4b60e" />
+
 ---
 
 ## System Architecture
